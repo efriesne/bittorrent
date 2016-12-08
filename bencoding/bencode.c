@@ -47,7 +47,7 @@ static inline void dump_string(const char *str, long long len)
 		else
 			printf("\\x%02x", s[i]);
 }
-#define DUMP_STRING(str, len) do { if (BE_DEBUG) dump_string(str, len); } while (0)
+#define DUMP_STRING(str, len) do { dump_string(str, len); } while (0)
 
 static be_node *be_alloc(be_type type)
 {
@@ -269,7 +269,6 @@ void be_free(be_node *node)
 	free(node);
 }
 
-#if BE_DEBUG
 #include <stdio.h>
 #include <stdint.h>
 
@@ -326,4 +325,3 @@ void be_dump(be_node *node)
 {
 	_be_dump(node, 0);
 }
-#endif
