@@ -1,4 +1,4 @@
-CC = gcc
+CC = gcc -I curl/include -L curl/lib -lcurl
 DEBUGFLAGS = -g -Wall
 CFLAGS = -pthread -D_REENTRANT -D_XOPEN_SOURCE=500 
 LDFLAGS = -lpthread 

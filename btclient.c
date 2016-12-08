@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #endif
 #include "bencoding/bencode.h"
+#include <curl/curl.h>
 
 char *read_file(const char *file, long long *len) {
 	struct stat st;
@@ -34,6 +35,16 @@ char *read_file(const char *file, long long *len) {
 
 int main(int argc, char *argv[])
 {
+		CURL *curl;
+	  CURLcode res;
+	 
+	  curl_global_init(CURL_GLOBAL_DEFAULT);
+	 
+	  curl = curl_easy_init();
+
+
+
+
 	int i;
 
 	setbuf(stdout, NULL);
