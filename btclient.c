@@ -1,13 +1,10 @@
-#define FILE_IO
-
 #include <stdio.h>
 #include <string.h>
-#ifdef FILE_IO
 #include <sys/stat.h>
 #include <stdlib.h>
-#endif
 #include "bencoding/bencode.h"
 #include <curl/curl.h>
+#include "btclient.h"
 
 char *read_file(const char *file, long long *len) {
 	struct stat st;
@@ -32,6 +29,7 @@ char *read_file(const char *file, long long *len) {
 
 	return ret;
 }
+
 
 size_t tracker_response_func(void *ptr, size_t size, size_t nmemb, void *stream) {
 	size_t len;
@@ -65,7 +63,7 @@ add_url_param(char *url, char *key, char* val, int end) {
 	}
 }
 
-tracker_request_func(torrent_ctrl_t *tc, char *event) {
+tracker_request_func(torrent_ctrl_t tc, char *event) {
 	CURL *curl;
 	CURLcode res;
 	char *url;
@@ -78,13 +76,24 @@ tracker_request_func(torrent_ctrl_t *tc, char *event) {
 	if (curl) {
 		strcat(url_buf, tc.tracker_url);
 		strcat(url_buf, "?");
+
+		char uploaded[STRING_SIZE];
+		sprintf(uploaded, "%d", tc.uploaded);
+		char downloaded[STRING_SIZE];
+		sprintf(downloaded, "%d", tc.downloaded);
+		char left[STRING_SIZE];
+		sprintf(left, "%d", tc.torrent_len - tc.downloaded);
+		char compact[STRING_SIZE];
+		sprintf(compact, "%d", 1);
+
+
 		add_url_param(url_buf, "info_hash", tc.info_hash, 0);
 		add_url_param(url_buf, "peer_id", client_id, 0);
 		add_url_param(url_buf, "port", port, 0);
-		add_url_param(url_buf, "uploaded", tc.uploaded, 0);
-		add_url_param(url_buf, "downloaded", tc.downloaded, 0);
-		add_url_param(url_buf, "left", tc.torrend_len - downloaded, 0);
-		add_url_param(url_buf, "compact", 1, 0);
+		add_url_param(url_buf, "uploaded", uploaded, 0);
+		add_url_param(url_buf, "downloaded", downloaded, 0);
+		add_url_param(url_buf, "left", left, 0);
+		add_url_param(url_buf, "compact", compact, 0);
 		add_url_param(url_buf, "event", event, 1);
 		
 		curl_easy_setopt(curl, CURLOPT_URL, url_buf);
@@ -101,15 +110,20 @@ tracker_request_func(torrent_ctrl_t *tc, char *event) {
 }
 
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
 	int i;
-
-	setbuf(stdout, NULL);
-
 	char *buf;
 	long long len;
 	be_node *n;
+
+	if (argc != 4) {
+		printf("error: usage is <torrentfile> <dest directory> <port number>\n");
+		return -1;
+	}
+	tc.dest_dir = argv[2];
+	tc.uploaded = 0;
+	tc.downloaded = 0;
+	port = argv[3];
 
 	buf = read_file(argv[1], &len);
 	if (!buf) {
@@ -128,6 +142,15 @@ int main(int argc, char *argv[])
 	if (buf != argv[1]) {
 		free(buf);
 	}
-
 	return 0;
+}
+
+
+//prints the given bitmap
+void print_bitmap(char *bitmap, int numbits) {
+	int i;
+	for (i = 0; i < numbits; i++) {
+		printf("%d", get_bit(bitmap, i));
+	}
+	printf("\n");
 }
