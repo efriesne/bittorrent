@@ -14,6 +14,9 @@
 
 #define MAX_FILENAME 1024
 #define PEER_ID_SIZE 20
+#define MAX_URL_SIZE 2048
+#define PORT_SIZE 32
+#define STRING_SIZE 128
 
 typedef struct piece {
 	char *block_bitmap; //does this have a predefined length or is it different from torrent to torrent
@@ -53,9 +56,9 @@ typedef struct torrent_ctrl {
 	char *tracker_url;
 } torrent_ctrl_t;
 
-int port;
+char *port;
 char client_id[PEER_ID_SIZE];
-torrent_ctrl_t torrent_ctrl;
+torrent_ctrl_t tc;
 
 
 void print_bitmap(char *bitmap, int numbits);
