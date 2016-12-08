@@ -1,13 +1,10 @@
-#define FILE_IO
-
 #include <stdio.h>
 #include <string.h>
-#ifdef FILE_IO
 #include <sys/stat.h>
 #include <stdlib.h>
-#endif
 #include "bencoding/bencode.h"
 #include <curl/curl.h>
+#include "btclient.h"
 
 char *read_file(const char *file, long long *len) {
 	struct stat st;
@@ -35,23 +32,17 @@ char *read_file(const char *file, long long *len) {
 
 int main(int argc, char *argv[])
 {
-		CURL *curl;
-	  CURLcode res;
-	 
-	  curl_global_init(CURL_GLOBAL_DEFAULT);
-	 
-	  curl = curl_easy_init();
-
-
-
-
 	int i;
-
-	setbuf(stdout, NULL);
-
 	char *buf;
 	long long len;
 	be_node *n;
+
+	if (argc != 4) {
+		printf("error: usage is <torrentfile> <dest directory> <port number>\n");
+		return -1;
+	}
+	torrent_ctrl.dest_dir = argv[2];
+	port = atoi(argv[3]);
 
 	buf = read_file(argv[1], &len);
 	if (!buf) {
@@ -70,6 +61,15 @@ int main(int argc, char *argv[])
 	if (buf != argv[1]) {
 		free(buf);
 	}
-
 	return 0;
+}
+
+
+//prints the given bitmap
+void print_bitmap(char *bitmap, int numbits) {
+	int i;
+	for (i = 0; i < numbits; i++) {
+		printf("%d", get_bit(bitmap, i));
+	}
+	printf("\n");
 }
