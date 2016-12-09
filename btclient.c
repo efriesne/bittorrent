@@ -5,6 +5,7 @@
 #include "bencoding/bencode.h"
 #include <curl/curl.h>
 #include "btclient.h"
+#include <openssl/sha.h>
 
 char *read_file(const char *file, long long *len) {
 	struct stat st;
@@ -44,7 +45,7 @@ size_t tracker_response_func(void *ptr, size_t size, size_t nmemb, void *stream)
 	fread(response_str, 1, len, (FILE *)stream);
 	fclose(stream);
 
-	n = be_decoden(response_str, len);
+	n = be_decoden(response_str, len, NULL, NULL);
 	if (n) {
 		be_dump(n);
 		be_free(n);
@@ -70,10 +71,14 @@ tracker_request_func(torrent_ctrl_t tc, char *event) {
 	FILE *tracker_response_file;
 	char url_buf[MAX_URL_SIZE];
 	memset(url_buf, 0, MAX_URL_SIZE);
+	char *encoded_info_hash;
 
 	curl_global_init(CURL_GLOBAL_DEFAULT); 
 	curl = curl_easy_init();
 	if (curl) {
+
+		encoded_info_hash = curl_easy_escape(curl, tc.info_hash, 20);
+
 		strcat(url_buf, tc.tracker_url);
 		strcat(url_buf, "?");
 
@@ -103,7 +108,7 @@ tracker_request_func(torrent_ctrl_t tc, char *event) {
 			fprintf(stderr, "curl_easy_perform() failed: %s\n",
 		    curl_easy_strerror(res));
 		}
-
+		curl_free(encoded_info_hash);
 		curl_easy_cleanup(curl);
 	}
 	curl_global_cleanup();
@@ -130,11 +135,14 @@ int main(int argc, char *argv[]) {
 		buf = argv[1];
 		len = strlen(argv[1]);
 	}
-
+	char info_str[len];
+	int info_str_len;
+	printf("len %d\n", len);
 	printf("DECODING: %s\n", argv[1]);
-	n = be_decoden(buf, len);
+	n = be_decoden(buf, len, info_str, &info_str_len);
+
 	if (n) {
-		be_dump(n);
+		//be_dump(n);
 		be_free(n);
 	} else {
 		printf("\tparsing failed!\n");
@@ -142,6 +150,14 @@ int main(int argc, char *argv[]) {
 	if (buf != argv[1]) {
 		free(buf);
 	}
+
+	SHA1(info_str, info_str_len, tc.info_hash);
+	tc.downloaded = 0;
+	tc.uploaded = 0;
+
+	
+
+
 	return 0;
 }
 

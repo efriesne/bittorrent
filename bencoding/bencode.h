@@ -53,8 +53,8 @@ typedef struct be_node {
 } be_node;
 
 extern long long be_str_len(be_node *node);
-extern be_node *be_decode(const char *bencode, char *info_str);
-extern be_node *be_decoden(const char *bencode, long long bencode_len, char *info_str);
+extern be_node *be_decode(const char *bencode, char *info_str,  int *info_str_len);
+extern be_node *be_decoden(const char *bencode, long long bencode_len, char *info_str,  int *info_str_len);
 extern void be_free(be_node *node);
 extern void be_dump(be_node *node);
 

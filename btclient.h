@@ -52,7 +52,7 @@ typedef struct torrent_ctrl {
 	char *piece_bitmap;
 	int torrent_len;
 	int num_pieces;
-	char *info_hash; //maybe depending on number of times it is used
+	char info_hash[20]; //maybe depending on number of times it is used
 	char *tracker_url;
 } torrent_ctrl_t;
 
