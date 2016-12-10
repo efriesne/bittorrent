@@ -145,6 +145,38 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
+int get_next_piece() {
+	int i;
+	for (i = 0; i < tc.num_pieces; i++) {
+		if (get_bit(tc.piece_bitmap, i) == 0) {
+			return i;
+		}
+	}
+}
+
+int get_next_block(int pieceno) {
+	char *block_bitmap = tc.pieces[pieceno]->block_bitmap;
+	for (i = 0; i < ((int) tc.pieces[pieceno]->len / BLOCKSIZE); i++) {
+		if (get_bit(block_bitmap, i) == 0) {
+			return i;
+		}
+	}
+}
+
+void get_block(peer_t *peer, int *offset, int *length) {
+	if (peer->cur_piece == UNSET || get_bit(peer->cur_piece) == 1) {
+		peer->cur_piece = get_next_piece();
+	}
+	int blockno = get_next_block(peer->cur_piece);
+	*offset = blockno*BLOCKSIZE;
+	*length = MIN(BLOCKSIZE, tc.pieces[peer->cur_piece]->len - *offset);
+}
+
+int write_block(char *block_ptr, int pieceno, int offset, int len) {
+	int byte_num = pieceno*tc.piece_length + offset;
+
+}
+
 
 //prints the given bitmap
 void print_bitmap(char *bitmap, int numbits) {

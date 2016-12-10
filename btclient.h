@@ -7,6 +7,8 @@
 #define set_bit(A,k)     ( A[(k/8)] |= (1 << (k%8)) )
 #define clear_bit(A,k)   ( A[(k/8)] &= ~(1 << (k%8)) )
 #define get_bit(A,k)    ( (A[(k/8)] & (1 << (k%8))) >> (k%8))
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
 #define NOT_STARTED 0
 #define STARTED 1
@@ -17,6 +19,10 @@
 #define MAX_URL_SIZE 2048
 #define PORT_SIZE 32
 #define STRING_SIZE 128
+
+#define BLOCKSIZE 14000
+
+#define UNSET -1
 
 typedef struct piece {
 	char *block_bitmap; //does this have a predefined length or is it different from torrent to torrent
@@ -35,6 +41,7 @@ typedef struct btfile {
 typedef struct peer {
 	uint32_t ip;
 	char id[PEER_ID_SIZE];
+	int cur_piece; //the current piece we are downloading from this peer
 	//figure out what piece bitmap looks like
 	int status;
 	int choked;
