@@ -1,6 +1,6 @@
-CC = gcc -I curl/include -L curl/lib -lcurl
+CC = gcc -I curl/include -L curl/lib -lcurl 
 DEBUGFLAGS = -g -Wall
-CFLAGS = -pthread -D_REENTRANT -D_XOPEN_SOURCE=500 
+CFLAGS = -pthread -D_REENTRANT -D_XOPEN_SOURCE=500 -lssl
 LDFLAGS = -lpthread 
 
 all: btclient

@@ -115,7 +115,7 @@ static char *_be_decode_str(const char **data, long long *data_len)
 	return ret;
 }
 
-static be_node *_be_decode(const char **data, long long *data_len)
+static be_node *_be_decode(const char **data, long long *data_len, char *info_str, int *info_str_len)
 {
 	be_node *ret = NULL;
 
@@ -135,7 +135,7 @@ static be_node *_be_decode(const char **data, long long *data_len)
 			++(*data);
 			while (**data != 'e') {
 				ret->val.l = realloc(ret->val.l, (i + 2) * sizeof(*ret->val.l));
-				ret->val.l[i] = _be_decode(data, data_len);
+				ret->val.l[i] = _be_decode(data, data_len, info_str, info_str_len);
 				if (!ret->val.l[i])
 					break;
 				++i;
@@ -166,8 +166,22 @@ static be_node *_be_decode(const char **data, long long *data_len)
 				ret->val.d = realloc(ret->val.d, (i + 2) * sizeof(*ret->val.d));
 				DBG("  [%i] key: ", i);
 				ret->val.d[i].key = _be_decode_str(data, data_len);
+				if (!strcmp(ret->val.d[i].key,"locale")) {
+					printf("locale len %d\n", *data_len);
+				}
 				DBG("\n");
-				ret->val.d[i].val = _be_decode(data, data_len);
+				char *tmp = *data;
+				int tmp_len = *data_len;
+				ret->val.d[i].val = _be_decode(data, data_len, info_str, info_str_len);
+				if (!strcmp(ret->val.d[i].key,"info")) {
+					
+					int info_len = tmp_len - *data_len;
+
+					if (info_str != NULL) {
+						memcpy(info_str, tmp, info_len);
+						*info_str_len = info_len;	
+					}
+				}
 				if (!ret->val.l[i])
 					break;
 				++i;
@@ -223,14 +237,14 @@ static be_node *_be_decode(const char **data, long long *data_len)
 	return ret;
 }
 
-be_node *be_decoden(const char *data, long long len)
+be_node *be_decoden(const char *data, long long len, char *info_str, int *info_str_len)
 {
-	return _be_decode(&data, &len);
+	return _be_decode(&data, &len, info_str, info_str_len);
 }
 
-be_node *be_decode(const char *data)
+be_node *be_decode(const char *data, char *info_str,  int *info_str_len)
 {
-	return be_decoden(data, strlen(data));
+	return be_decoden(data, strlen(data), info_str, info_str_len);
 }
 
 static inline void _be_free_str(char *str)
