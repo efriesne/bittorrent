@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <arpa/inet.h>
+#include 
 
 
 #define set_bit(A,k)     ( A[(k/8)] |= (1 << (k%8)) )
@@ -40,8 +41,8 @@
 #define UNSET -1
 
 typedef struct piece {
-	char *block_bitmap; //does this have a predefined length or is it different from torrent to torrent
-	char *requested_;
+	char *block_bitmap; 
+	char *requested_blocks;
 	int offset;
 	int len;
 	int status;
@@ -56,6 +57,11 @@ typedef struct btfile {
 	char sha1[SHA_SIZE];
 } btfile_t;
 
+typedef struct block {
+	int piece_idx;
+	int block_idx;
+} block_t;
+
 typedef struct peer {
 	char ip[INET_ADDRSTRLEN];
 	char id[PEER_ID_SIZE];
@@ -68,6 +74,8 @@ typedef struct peer {
 	int interested;
 	int interesting;
 	int sock;
+	// list_t requested; should we keep a list of what blocks have been requested from this peer in case they choke or cancel?
+	int num_requested; // the number of blocks we have requested from this peer (which havent been completed yet)
 	pthread_t thread;
 	char *piece_bitmap;
 } peer_t;

@@ -477,18 +477,29 @@ int main(int argc, char *argv[]) {
 	return 0;
 }
 
-int get_next_piece() {
+int is_fully_requested(int pieceno) {
+	char *block_bitmap = tc.pieces[pieceno].requested_blocks;
 	int i;
+	for (i = 0; i < ((int) tc.pieces[pieceno].len / BLOCKSIZE); i++) {
+		if (get_bit(block_bitmap, i) == 0) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+int get_next_piece() {
+	int i = UNSET;
 	for (i = 0; i < tc.num_pieces; i++) {
-		if (get_bit(tc.piece_bitmap, i) == 0) {
+		if (get_bit(tc.piece_bitmap, i) == 0 && !is_fully_requested(i)) {
 			return i;
 		}
 	}
 }
 
 int get_next_block(int pieceno) {
-	char *block_bitmap = tc.pieces[pieceno].block_bitmap;
-	int i;
+	char *block_bitmap = tc.pieces[pieceno].tc.pieces[pieceno].requested_blocks;
+	int i = UNSET;
 	for (i = 0; i < ((int) tc.pieces[pieceno].len / BLOCKSIZE); i++) {
 		if (get_bit(block_bitmap, i) == 0) {
 			return i;
@@ -496,11 +507,19 @@ int get_next_block(int pieceno) {
 	}
 }
 
-void get_block(peer_t *peer, int *offset, int *length) {
-	if (peer->cur_piece == UNSET || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
+//if all blocks have been requested, this puts UNSET in block
+void get_block(peer_t *peer, int *block, int *offset, int *length) {
+	pthread_mutex_lock(tc.mtx);
+	if (peer->cur_piece == UNSET || is_fully_requested(i) || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
 		peer->cur_piece = get_next_piece();
 	}
+	if (peer->curpiece = UNSET) {
+		*block = UNSET;
+		return;
+	}
 	int blockno = get_next_block(peer->cur_piece);
+	pthread_mutex_unlock(tc.mtx);
+	*block = blockno;
 	*offset = blockno*BLOCKSIZE;
 	*length = MIN(BLOCKSIZE, tc.pieces[peer->cur_piece].len - *offset);
 }
