@@ -356,12 +356,56 @@ int main(int argc, char *argv[]) {
 	if (buf != argv[1]) {
 		free(buf);
 	}
-
-	
-
-
-
 	return 0;
+}
+
+int get_next_piece() {
+	int i;
+	for (i = 0; i < tc.num_pieces; i++) {
+		if (get_bit(tc.piece_bitmap, i) == 0) {
+			return i;
+		}
+	}
+}
+
+int get_next_block(int pieceno) {
+	char *block_bitmap = tc.pieces[pieceno].block_bitmap;
+	int i;
+	for (i = 0; i < ((int) tc.pieces[pieceno].len / BLOCKSIZE); i++) {
+		if (get_bit(block_bitmap, i) == 0) {
+			return i;
+		}
+	}
+}
+
+void get_block(peer_t *peer, int *offset, int *length) {
+	if (peer->cur_piece == UNSET || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
+		peer->cur_piece = get_next_piece();
+	}
+	int blockno = get_next_block(peer->cur_piece);
+	*offset = blockno*BLOCKSIZE;
+	*length = MIN(BLOCKSIZE, tc.pieces[peer->cur_piece].len - *offset);
+}
+
+int write_block(char *block_ptr, int pieceno, int offset, int len) {
+	int byte_num = pieceno*tc.piece_length + offset;
+	int i;
+	for (i = 0; i < tc.num_files; i++) {
+		btfile_t file = tc.files[i];
+		if (byte_num >= file.offset && byte_num < file.offset + file.len) {
+			int to_write = MIN(len, file.len);
+			int written = write(file.fd, block_ptr, to_write);
+			if (written < 0) {
+				//error occurred
+				perror("error writing to one of the files");
+				return -1;
+			}
+			if (written < len) {
+				write_block(block_ptr + written, pieceno, offset + written, len - written);
+			}
+			return 1;
+		}
+	}
 }
 
 

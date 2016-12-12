@@ -9,6 +9,8 @@
 #define set_bit(A,k)     ( A[(k/8)] |= (1 << (k%8)) )
 #define clear_bit(A,k)   ( A[(k/8)] &= ~(1 << (k%8)) )
 #define get_bit(A,k)    ( (A[(k/8)] & (1 << (k%8))) >> (k%8))
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
 #define NOT_STARTED 0
 #define STARTED 1
@@ -21,6 +23,10 @@
 #define STRING_SIZE 128
 #define SHA_SIZE 20
 #define RESPONSE_FILENAME "tracker_response_file"
+
+#define BLOCKSIZE 14000
+
+#define UNSET -1
 
 typedef struct piece {
 	char *block_bitmap; //does this have a predefined length or is it different from torrent to torrent
@@ -41,8 +47,8 @@ typedef struct btfile {
 typedef struct peer {
 	char ip[INET_ADDRSTRLEN];
 	char id[PEER_ID_SIZE];
+	int cur_piece; //the current piece we are downloading from this peer
 	uint16_t port;
-	//figure out what piece bitmap looks like
 	int status;
 	int choked;
 	int choking;
@@ -62,6 +68,7 @@ typedef struct torrent_ctrl {
 	char *piece_bitmap;
 	int torrent_len;
 	int num_pieces;
+	int num_files;
 	int piece_length;
 	char info_hash[SHA_SIZE]; //maybe depending on number of times it is used
 	char tracker_url[1024];
