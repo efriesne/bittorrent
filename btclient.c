@@ -10,6 +10,20 @@
 #include <sys/types.h>
 #include <math.h>
 #include <error.h>
+#include <errno.h>
+#include <fcntl.h>
+
+int mkpath(char* file_path, mode_t mode) {
+  char* p;
+  for (p=strchr(file_path+1, '/'); p; p=strchr(p+1, '/')) {
+    *p='\0';
+    if (mkdir(file_path, mode)==-1) {
+      if (errno!=EEXIST) { *p='/'; return -1; }
+    }
+    *p='/';
+  }
+  return 0;
+}
 
 void dump_string(const char *str, long long len)
 {
@@ -213,15 +227,29 @@ void setup_files(be_node *files) {
 	int num_files = 0;
 	tc.torrent_len = 0;
 	for (i = 0; files->val.l[i]; ++i) {
+		num_files++;
+	}
+	tc.files = malloc(sizeof(btfile_t)*num_files);
+	for (i = 0; files->val.l[i]; ++i) {
 		be_node *file = files->val.l[i];
 		for (j = 0; file->val.d[j].val; ++j) {
 			be_dict file_item = file->val.d[j];
 			if (!strcmp(file_item.key, "length")) {
+				tc.files[i].offset = tc.torrent_len;
 				tc.torrent_len += file_item.val->val.i;
 			}
+			if (!strcmp(file_item.key, "path")) {
+				be_node *node = file_item.val->val.l[0];
+				memcpy(tc.files[i].filename, node->val.s, strlen(node->val.s));
+				char full_path[MAX_FILENAME];
+				memcpy(full_path, tc.dest_dir, strlen(tc.dest_dir));
+				memcpy(full_path + strlen(tc.dest_dir), tc.files[i].filename, strlen(tc.files[i].filename));
+				tc.files[i].fd = open(full_path, O_CREAT | O_RDWR, S_IRWXU);
+				printf("filename %s\n", tc.files[i].filename);
+			}
 		}
-		num_files++;
 	}
+
 	printf("torrent len %d\n", tc.torrent_len);
 	/*
 	tc.files = (btfile_t *)malloc(sizeof(btfile_t) * num_files);
@@ -288,6 +316,7 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 	tc.dest_dir = argv[2];
+	mkpath(tc.dest_dir, 0755);
 	tc.uploaded = 0;
 	tc.downloaded = 0;
 	port = argv[3];
@@ -302,7 +331,7 @@ int main(int argc, char *argv[]) {
 	printf("DECODING: %s\n", argv[1]);
 	n = be_decoden(buf, len, info_str, &info_str_len);
 	if (n) {
-		//be_dump(n);
+		be_dump(n);
 
 		//parse info from decoded torrent file
 		for (i = 0; n->val.d[i].val; ++i) {
