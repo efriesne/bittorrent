@@ -63,13 +63,14 @@ typedef struct peer {
 	uint16_t port;
 	int status;
 	int received_bitmap;
-	int choked;
-	int choking;
-	int interested;
-	int interesting;
+	int am_choking;
+	int am_interested;
+	int peer_chocking;
+	int peer_interested;
 	int sock;
 	pthread_t thread;
-	char *piece_bitmap;
+	char *bitmap;
+	char *bitmap_len;
 } peer_t;
 
 typedef struct torrent_ctrl {
