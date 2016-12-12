@@ -190,7 +190,23 @@ void get_block(peer_t *peer, int *offset, int *length) {
 
 int write_block(char *block_ptr, int pieceno, int offset, int len) {
 	int byte_num = pieceno*tc.piece_length + offset;
-
+	int i;
+	for (i = 0; i < num_files; i++) {
+		btfile_t file = tc.files[i];
+		if (byte_num >= file.offset && byte_num < file.offset + file.len) {
+			int to_write = MIN(len, file.len);
+			int written = write(file.fd, block_ptr, to_write);
+			if (written < 0) {
+				//error occurred
+				perror("error writing to one of the files");
+				return -1;
+			}
+			if (written < len) {
+				write_block(block_ptr + written, pieceno, offset + written, len - written);
+			}
+			return 1;
+		}
+	}
 }
 
 

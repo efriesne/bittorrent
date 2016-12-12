@@ -59,6 +59,7 @@ typedef struct torrent_ctrl {
 	char *piece_bitmap;
 	int torrent_len;
 	int num_pieces;
+	int num_files;
 	char info_hash[20]; //maybe depending on number of times it is used
 	char *tracker_url;
 } torrent_ctrl_t;
