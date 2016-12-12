@@ -144,6 +144,14 @@ int do_handshake(peer_t *peer) {
         return 0;
 }
 
+void handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
+	if (reply_id == BITFIELD) {
+		char bitfield[reply_len -1];
+		read(peer->sock, bitfield, reply_len -1);
+
+	}
+}
+
 void download_from_peer(void *args) {
 	int peer_id = *(int*)args;
 
@@ -170,6 +178,15 @@ void download_from_peer(void *args) {
 	* 5. After receiving a block, check the SHA-1 to see if the piece has been fully downloaded 
 	** always check for receival of a choke
 	*/
+	peer_t *peer = &tc.peers[peer_id];
+	while (1) {
+		uint32_t reply_len;
+		uint8_t reply_id;
+		read(peer->sock, &reply_len, sizeof(reply_len));
+		read(peer->sock, &reply_id, sizeof(reply_id));
+		reply_len = ntohl(reply_len);
+		handle_reply(peer, reply_id, reply_len);
+	}
 }
 
 int setup_peers(char *peers_str, int peer_count) {

@@ -26,10 +26,22 @@
 
 #define BLOCKSIZE 14000
 
+#define CHOKE 0
+#define UNCHOKE 1
+#define INTERESTED 2
+#define NOT_INTERESTED 3
+#define HAVE 4
+#define BITFIELD 5
+#define REQUEST 6
+#define PIECE 7
+#define CANCEL 8
+#define PORT 9
+
 #define UNSET -1
 
 typedef struct piece {
 	char *block_bitmap; //does this have a predefined length or is it different from torrent to torrent
+	char *requested_;
 	int offset;
 	int len;
 	int status;
@@ -50,18 +62,21 @@ typedef struct peer {
 	int cur_piece; //the current piece we are downloading from this peer
 	uint16_t port;
 	int status;
+	int received_bitmap;
 	int choked;
 	int choking;
 	int interested;
 	int interesting;
 	int sock;
 	pthread_t thread;
+	char *piece_bitmap;
 } peer_t;
 
 typedef struct torrent_ctrl {
 	btfile_t *files;
 	piece_t *pieces;
 	peer_t *peers;
+	pthread_mutex_t mtx;
 	char *dest_dir;
 	int downloaded;
 	int uploaded;
