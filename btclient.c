@@ -9,7 +9,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <math.h>
-#include <error.h>
+#include "error.h"
+#include <sys/socket.h>
+#include <netdb.h>
+
 
 void dump_string(const char *str, long long len)
 {
@@ -21,9 +24,9 @@ void dump_string(const char *str, long long len)
 		if (s[i] >= 0x20 && s[i] <= 0x7e)
 			printf("%c", s[i]);
 		else
-			printf("\\x%02x", s[i]);
+			printf("\\x%02x", s[i]);  
 }
-/*
+
 int create_tcp_socket(char *host, char *port, int *sock){
         struct addrinfo hints;
         struct addrinfo *results;
@@ -33,17 +36,18 @@ int create_tcp_socket(char *host, char *port, int *sock){
         hints.ai_family = AF_UNSPEC;
         hints.ai_flags = AI_PASSIVE;
         hints.ai_socktype = SOCK_STREAM;
-       
+       printf("creating socket with ip %s and port %s\n", host, port);
         if ((err = getaddrinfo(host, port, &hints, &results)) != 0){
                 perror("getaddrinfo: error occured");
                 return -SYS_ERR;
         }
-
         for (rp = results; rp != NULL; rp = rp->ai_next) {
                 if ((*sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol)) < 0){
+                        printf("here\n");
                         continue;
                 }
                 if (connect(*sock, rp->ai_addr, rp->ai_addrlen) >= 0){
+                        printf("connected to socket\n");
                         break;
                 }
                 if (close(*sock) == -1){
@@ -52,14 +56,16 @@ int create_tcp_socket(char *host, char *port, int *sock){
                         return -SYS_ERR;
                 }
         }
+
         if (rp == NULL){
                 fprintf(stderr, "error: could not connect to host %s at port number %s\n", host, port);
                 freeaddrinfo(results);
                 return -CONN_ERR;
         }
         freeaddrinfo(results);
+        close(*sock);
         return 0;
-}*/
+}
 
 char *read_file(const char *file, long long *len) {
 	struct stat st;
@@ -85,27 +91,42 @@ char *read_file(const char *file, long long *len) {
 	return ret;
 }
 
+void download_from_peer() {
+
+}
+
 void setup_peers(char *peers_str, int peer_count) {
 	int i;
 	struct sockaddr_in sa;
 	tc.peers = (peer_t *)malloc(sizeof(peer_t)*peer_count);
 	for (i = 0; i < peer_count; i++) {
+		//parse ip address
 		uint32_t addr;
 		struct in_addr ip;
 		ip.s_addr = *((uint32_t *) peers_str);
 		inet_ntop(AF_INET,&ip, tc.peers[i].ip, INET_ADDRSTRLEN);
 		printf("ip %s\n", tc.peers[i].ip);
 		peers_str += 4;
+		
+		//parse port
 		uint16_t port;
 		memcpy(&port, peers_str, 2);
 		tc.peers[i].port = ntohs(port);
 		peers_str += 2;
 
-		/*if (setup_tcp_socket(saddr, port, &tc.peers[i].sock) < 0) {
-			printf("problem connecting to peer\n");
-		}*/
+		//create TCP socket
+		char port_str[PORT_SIZE];
+		sprintf(port_str, "%u", tc.peers[i].port);
+		if (create_tcp_socket(tc.peers[i].ip, port_str, &tc.peers[i].sock) < 0) {
+			printf("problem making tcp socket\n");
+		}
+
+		//start downloading from peer
+/*
+		if ((err = pthread_create(&tc.peers[i].thread, NULL, (void *)&download_from_peer, NULL)) < 0) {
+                
+        }*/
 	}
-	//free(peers_str);
 }
 
 void tracker_response_func() {

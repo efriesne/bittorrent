@@ -49,6 +49,7 @@ typedef struct peer {
 	int interested;
 	int interesting;
 	int sock;
+	pthread_t thread;
 } peer_t;
 
 typedef struct torrent_ctrl {
