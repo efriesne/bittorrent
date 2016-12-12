@@ -102,7 +102,7 @@ int do_handshake(peer_t *peer) {
         write(peer->sock, pstrlen, 1);
         write(peer->sock, pstr, strlen(pstr));
         write(peer->sock, reserved, 8);
-        write(tc.info_hash, SHA_SIZE);
+        write(tc.info_hash, SHA_SIZE); 
         //write(client_id, PEER_ID_SIZE);
 
         //receive handshake from peer
@@ -124,12 +124,14 @@ int do_handshake(peer_t *peer) {
         //add peer id
 
         printf("handshake succeeded\n");
+
+
         return 0;
 }
 
 void download_from_peer(void *args) {
 	int peer_id = *(int*)args;
-	
+
 	//create TCP socket
 	char port_str[PORT_SIZE];
 	sprintf(port_str, "%u", tc.peers[peer_id].port);
@@ -143,6 +145,16 @@ void download_from_peer(void *args) {
 	}
 
 	//start requesting blocks from peer
+	//TODO
+	/*
+	* 1. send bitmap message + receive bitmap message
+	* 2. send interested message if pieces remaining
+	* 3. wait to receive unchoke message 
+	* 4. build up queue of block request messages 
+	*  		-have a separate request bitmap to mark blocks of a piece that have been requested, need piece mutex
+	* 5. After receiving a block, check the SHA-1 to see if the piece has been fully downloaded 
+	** always check for receival of a choke
+	*/
 }
 
 int setup_peers(char *peers_str, int peer_count) {
@@ -173,6 +185,7 @@ int setup_peers(char *peers_str, int peer_count) {
         }
         return 0;
 	}
+	// TODO: thread for checking keep alive messages & sending keep alive messages
 }
 
 void tracker_response_func() {
@@ -397,8 +410,13 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+		
+
 		SHA1(info_str, info_str_len, tc.info_hash);
 		sprintf(client_id, "emmanoah%d", getpid());
+		
+		//TODO - check if some of file has been downloaded - run function for "have" message once before requesting tracker info
+
 		tracker_request_func("started");
 		be_free(n);
 		
