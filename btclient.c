@@ -12,6 +12,10 @@
 #include <error.h>
 #include <errno.h>
 #include <fcntl.h>
+#include "error.h"
+#include <sys/socket.h>
+#include <netdb.h>
+
 
 int mkpath(char* file_path, mode_t mode) {
   char* p;
@@ -35,9 +39,9 @@ void dump_string(const char *str, long long len)
 		if (s[i] >= 0x20 && s[i] <= 0x7e)
 			printf("%c", s[i]);
 		else
-			printf("\\x%02x", s[i]);
+			printf("\\x%02x", s[i]);  
 }
-/*
+
 int create_tcp_socket(char *host, char *port, int *sock){
         struct addrinfo hints;
         struct addrinfo *results;
@@ -47,17 +51,18 @@ int create_tcp_socket(char *host, char *port, int *sock){
         hints.ai_family = AF_UNSPEC;
         hints.ai_flags = AI_PASSIVE;
         hints.ai_socktype = SOCK_STREAM;
-       
+       printf("creating socket with ip %s and port %s\n", host, port);
         if ((err = getaddrinfo(host, port, &hints, &results)) != 0){
                 perror("getaddrinfo: error occured");
                 return -SYS_ERR;
         }
-
         for (rp = results; rp != NULL; rp = rp->ai_next) {
                 if ((*sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol)) < 0){
+                        printf("here\n");
                         continue;
                 }
                 if (connect(*sock, rp->ai_addr, rp->ai_addrlen) >= 0){
+                        printf("connected to socket\n");
                         break;
                 }
                 if (close(*sock) == -1){
@@ -66,14 +71,16 @@ int create_tcp_socket(char *host, char *port, int *sock){
                         return -SYS_ERR;
                 }
         }
+
         if (rp == NULL){
                 fprintf(stderr, "error: could not connect to host %s at port number %s\n", host, port);
                 freeaddrinfo(results);
                 return -CONN_ERR;
         }
         freeaddrinfo(results);
+        close(*sock);
         return 0;
-}*/
+}
 
 char *read_file(const char *file, long long *len) {
 	struct stat st;
@@ -99,27 +106,101 @@ char *read_file(const char *file, long long *len) {
 	return ret;
 }
 
-void setup_peers(char *peers_str, int peer_count) {
+int do_handshake(peer_t *peer) {
+
+		//send handshake to peer
+		char pstrlen[1];
+		sprintf(pstrlen, "%d", 19);
+		char *pstr = "BitTorrent protocol";
+		char reserved[8];
+		memset(reserved, 0, 8);
+        write(peer->sock, pstrlen, 1);
+        write(peer->sock, pstr, strlen(pstr));
+        write(peer->sock, reserved, 8);
+        write(tc.info_hash, SHA_SIZE); 
+        //write(client_id, PEER_ID_SIZE);
+
+        //receive handshake from peer
+        char *reply_pstrlen;
+        char *reply_pstr;
+        char *reply_reserved;
+        char *reply_info_hash;
+        char *reply_peer_id;
+        read(peer->sock, reply_pstrlen, 1);
+        read(peer->sock, reply_pstr, strlen(pstr));
+        read(peer->sock, reply_reserved, 8);
+        read(peer->sock, reply_info_hash, SHA_SIZE);
+        if (!strcmp(reply_info_hash, tc.info_hash)) {
+        	printf("sha1 from responding handshake incorrect\n");
+        	return -1;
+        }
+        read(peer->sock, reply_peer_id, PEER_ID_SIZE);
+
+        //add peer id
+
+        printf("handshake succeeded\n");
+
+
+        return 0;
+}
+
+void download_from_peer(void *args) {
+	int peer_id = *(int*)args;
+
+	//create TCP socket
+	char port_str[PORT_SIZE];
+	sprintf(port_str, "%u", tc.peers[peer_id].port);
+	if (create_tcp_socket(tc.peers[peer_id].ip, port_str, &tc.peers[peer_id].sock) < 0) {
+		printf("problem making tcp socket\n");
+		return;
+	}
+
+	if (do_handshake(&tc.peers[peer_id]) < 0) {
+		return;
+	}
+
+	//start requesting blocks from peer
+	//TODO
+	/*
+	* 1. send bitmap message + receive bitmap message
+	* 2. send interested message if pieces remaining
+	* 3. wait to receive unchoke message 
+	* 4. build up queue of block request messages 
+	*  		-have a separate request bitmap to mark blocks of a piece that have been requested, need piece mutex
+	* 5. After receiving a block, check the SHA-1 to see if the piece has been fully downloaded 
+	** always check for receival of a choke
+	*/
+}
+
+int setup_peers(char *peers_str, int peer_count) {
 	int i;
 	struct sockaddr_in sa;
 	tc.peers = (peer_t *)malloc(sizeof(peer_t)*peer_count);
 	for (i = 0; i < peer_count; i++) {
+		//parse ip address
 		uint32_t addr;
 		struct in_addr ip;
 		ip.s_addr = *((uint32_t *) peers_str);
 		inet_ntop(AF_INET,&ip, tc.peers[i].ip, INET_ADDRSTRLEN);
 		printf("ip %s\n", tc.peers[i].ip);
 		peers_str += 4;
+		
+		//parse port
 		uint16_t port;
 		memcpy(&port, peers_str, 2);
 		tc.peers[i].port = ntohs(port);
 		peers_str += 2;
 
-		/*if (setup_tcp_socket(saddr, port, &tc.peers[i].sock) < 0) {
-			printf("problem connecting to peer\n");
-		}*/
+		//start downloading from peer
+		int *peer_id = malloc(sizeof(int));
+		*peer_id = i;
+		if (pthread_create(&tc.peers[i].thread, NULL, (void *)&download_from_peer, (void *)peer_id) < 0) {
+         	perror("problem creating peer thread");
+         	return -1;       
+        }
+        return 0;
 	}
-	//free(peers_str);
+	// TODO: thread for checking keep alive messages & sending keep alive messages
 }
 
 void tracker_response_func() {
@@ -144,6 +225,9 @@ void tracker_response_func() {
 			} else if (!strcmp(n->val.d[i].key, "peers")) {
 				peers_str = (char * )malloc(peer_count*6);
 				memcpy(peers_str,  n->val.d[i].val->val.s, peer_count*6);
+			} else if (!strcmp(n->val.d[i].key, "tracker_id")) {
+				tc.tracker_id = (char *)malloc(strlen(n->val.d[i].val->val.s));
+				memcpy(tc.tracker_id, n->val.d[i].val->val.s, strlen(n->val.d[i].val->val.s));
 			}
 		}
 
@@ -341,8 +425,12 @@ int main(int argc, char *argv[]) {
 			} else if (!strcmp(n->val.d[i].key, "info")) {
 				be_node *info_n = n->val.d[i].val;
 				for (j = 0; info_n->val.d[j].val; ++j) {
-					if (!strcmp(info_n->val.d[j].key, "files")) {
+					if (!strcmp(info_n->val.d[j].key, "files")) { //multi file mode
 						setup_files(info_n->val.d[j].val);
+					} else if (!strcmp(info_n->val.d[j].key, "length")) { //single file mode
+						
+						//TO DO
+
 					} else if (!strcmp(info_n->val.d[j].key, "piece length")) {
 						tc.piece_length = info_n->val.d[j].val->val.i;
 					} else if (!strcmp(info_n->val.d[j].key, "pieces")) {
@@ -352,8 +440,13 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+		
+
 		SHA1(info_str, info_str_len, tc.info_hash);
 		sprintf(client_id, "emmanoah%d", getpid());
+		
+		//TODO - check if some of file has been downloaded - run function for "have" message once before requesting tracker info
+
 		tracker_request_func("started");
 		be_free(n);
 		

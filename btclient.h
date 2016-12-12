@@ -55,6 +55,7 @@ typedef struct peer {
 	int interested;
 	int interesting;
 	int sock;
+	pthread_t thread;
 } peer_t;
 
 typedef struct torrent_ctrl {
@@ -71,6 +72,7 @@ typedef struct torrent_ctrl {
 	int piece_length;
 	char info_hash[SHA_SIZE]; //maybe depending on number of times it is used
 	char tracker_url[1024];
+	char *tracker_id;
 } torrent_ctrl_t;
 
 char *port;
