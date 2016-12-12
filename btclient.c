@@ -91,11 +91,61 @@ char *read_file(const char *file, long long *len) {
 	return ret;
 }
 
-void download_from_peer() {
+int do_handshake(peer_t *peer) {
 
+		//send handshake to peer
+		char pstrlen[1];
+		sprintf(pstrlen, "%d", 19);
+		char *pstr = "BitTorrent protocol";
+		char reserved[8];
+		memset(reserved, 0, 8);
+        write(peer->sock, pstrlen, 1);
+        write(peer->sock, pstr, strlen(pstr));
+        write(peer->sock, reserved, 8);
+        write(tc.info_hash, SHA_SIZE);
+        //write(client_id, PEER_ID_SIZE);
+
+        //receive handshake from peer
+        char *reply_pstrlen;
+        char *reply_pstr;
+        char *reply_reserved;
+        char *reply_info_hash;
+        char *reply_peer_id;
+        read(peer->sock, reply_pstrlen, 1);
+        read(peer->sock, reply_pstr, strlen(pstr));
+        read(peer->sock, reply_reserved, 8);
+        read(peer->sock, reply_info_hash, SHA_SIZE);
+        if (!strcmp(reply_info_hash, tc.info_hash)) {
+        	printf("sha1 from responding handshake incorrect\n");
+        	return -1;
+        }
+        read(peer->sock, reply_peer_id, PEER_ID_SIZE);
+
+        //add peer id
+
+        printf("handshake succeeded\n");
+        return 0;
 }
 
-void setup_peers(char *peers_str, int peer_count) {
+void download_from_peer(void *args) {
+	int peer_id = *(int*)args;
+	
+	//create TCP socket
+	char port_str[PORT_SIZE];
+	sprintf(port_str, "%u", tc.peers[peer_id].port);
+	if (create_tcp_socket(tc.peers[peer_id].ip, port_str, &tc.peers[peer_id].sock) < 0) {
+		printf("problem making tcp socket\n");
+		return;
+	}
+
+	if (do_handshake(&tc.peers[peer_id]) < 0) {
+		return;
+	}
+
+	//start requesting blocks from peer
+}
+
+int setup_peers(char *peers_str, int peer_count) {
 	int i;
 	struct sockaddr_in sa;
 	tc.peers = (peer_t *)malloc(sizeof(peer_t)*peer_count);
@@ -114,18 +164,14 @@ void setup_peers(char *peers_str, int peer_count) {
 		tc.peers[i].port = ntohs(port);
 		peers_str += 2;
 
-		//create TCP socket
-		char port_str[PORT_SIZE];
-		sprintf(port_str, "%u", tc.peers[i].port);
-		if (create_tcp_socket(tc.peers[i].ip, port_str, &tc.peers[i].sock) < 0) {
-			printf("problem making tcp socket\n");
-		}
-
 		//start downloading from peer
-/*
-		if ((err = pthread_create(&tc.peers[i].thread, NULL, (void *)&download_from_peer, NULL)) < 0) {
-                
-        }*/
+		int *peer_id = malloc(sizeof(int));
+		*peer_id = i;
+		if (pthread_create(&tc.peers[i].thread, NULL, (void *)&download_from_peer, (void *)peer_id) < 0) {
+         	perror("problem creating peer thread");
+         	return -1;       
+        }
+        return 0;
 	}
 }
 
@@ -151,6 +197,9 @@ void tracker_response_func() {
 			} else if (!strcmp(n->val.d[i].key, "peers")) {
 				peers_str = (char * )malloc(peer_count*6);
 				memcpy(peers_str,  n->val.d[i].val->val.s, peer_count*6);
+			} else if (!strcmp(n->val.d[i].key, "tracker_id")) {
+				tc.tracker_id = (char *)malloc(strlen(n->val.d[i].val->val.s));
+				memcpy(tc.tracker_id, n->val.d[i].val->val.s, strlen(n->val.d[i].val->val.s));
 			}
 		}
 
@@ -333,8 +382,12 @@ int main(int argc, char *argv[]) {
 			} else if (!strcmp(n->val.d[i].key, "info")) {
 				be_node *info_n = n->val.d[i].val;
 				for (j = 0; info_n->val.d[j].val; ++j) {
-					if (!strcmp(info_n->val.d[j].key, "files")) {
+					if (!strcmp(info_n->val.d[j].key, "files")) { //multi file mode
 						setup_files(info_n->val.d[j].val);
+					} else if (!strcmp(info_n->val.d[j].key, "length")) { //single file mode
+						
+						//TO DO
+
 					} else if (!strcmp(info_n->val.d[j].key, "piece length")) {
 						tc.piece_length = info_n->val.d[j].val->val.i;
 					} else if (!strcmp(info_n->val.d[j].key, "pieces")) {
