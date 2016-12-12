@@ -3,6 +3,8 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <arpa/inet.h>
+
 
 #define set_bit(A,k)     ( A[(k/8)] |= (1 << (k%8)) )
 #define clear_bit(A,k)   ( A[(k/8)] &= ~(1 << (k%8)) )
@@ -19,6 +21,8 @@
 #define MAX_URL_SIZE 2048
 #define PORT_SIZE 32
 #define STRING_SIZE 128
+#define SHA_SIZE 20
+#define RESPONSE_FILENAME "tracker_response_file"
 
 #define BLOCKSIZE 14000
 
@@ -29,6 +33,7 @@ typedef struct piece {
 	int offset;
 	int len;
 	int status;
+	char sha1[SHA_SIZE];
 } piece_t;
 
 typedef struct btfile {
@@ -36,23 +41,26 @@ typedef struct btfile {
 	int offset;
 	int fd;
 	int len;
+	char sha1[SHA_SIZE];
 } btfile_t;
 
 typedef struct peer {
-	uint32_t ip;
+	char ip[INET_ADDRSTRLEN];
 	char id[PEER_ID_SIZE];
 	int cur_piece; //the current piece we are downloading from this peer
-	//figure out what piece bitmap looks like
+	uint16_t port;
 	int status;
 	int choked;
 	int choking;
 	int interested;
 	int interesting;
+	int sock;
 } peer_t;
 
 typedef struct torrent_ctrl {
 	btfile_t *files;
 	piece_t *pieces;
+	peer_t *peers;
 	char *dest_dir;
 	int downloaded;
 	int uploaded;
@@ -60,8 +68,9 @@ typedef struct torrent_ctrl {
 	int torrent_len;
 	int num_pieces;
 	int num_files;
-	char info_hash[20]; //maybe depending on number of times it is used
-	char *tracker_url;
+	int piece_length;
+	char info_hash[SHA_SIZE]; //maybe depending on number of times it is used
+	char tracker_url[1024];
 } torrent_ctrl_t;
 
 char *port;
