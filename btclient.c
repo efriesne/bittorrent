@@ -51,7 +51,7 @@ int create_tcp_socket(char *host, char *port, int *sock){
         hints.ai_family = AF_UNSPEC;
         hints.ai_flags = AI_PASSIVE;
         hints.ai_socktype = SOCK_STREAM;
-       printf("creating socket with ip %s and port %s\n", host, port);
+       	printf("creating socket with ip %s and port %s\n", host, port);
         if ((err = getaddrinfo(host, port, &hints, &results)) != 0){
                 perror("getaddrinfo: error occured");
                 return -SYS_ERR;
@@ -61,6 +61,7 @@ int create_tcp_socket(char *host, char *port, int *sock){
                         printf("here\n");
                         continue;
                 }
+                printf("found socket %d\n", sock);
                 if (connect(*sock, rp->ai_addr, rp->ai_addrlen) >= 0){
                         printf("connected to socket\n");
                         break;
@@ -78,7 +79,7 @@ int create_tcp_socket(char *host, char *port, int *sock){
                 return -CONN_ERR;
         }
         freeaddrinfo(results);
-        close(*sock);
+        printf("done\n");
         return 0;
 }
 
@@ -109,47 +110,68 @@ char *read_file(const char *file, long long *len) {
 int do_handshake(peer_t *peer) {
 
 		//send handshake to peer
-		char pstrlen[1];
-		sprintf(pstrlen, "%d", 19);
+		uint8_t pstrlen = 19;
 		char *pstr = "BitTorrent protocol";
 		char reserved[8];
 		memset(reserved, 0, 8);
-        write(peer->sock, pstrlen, 1);
+		printf("pstr being sent %s tc hash %s and id %s with length %d\n", pstr, tc.info_hash, client_id, pstrlen);
+        write(peer->sock, &pstrlen, sizeof(uint8_t));
         write(peer->sock, pstr, strlen(pstr));
         write(peer->sock, reserved, 8);
-        write(tc.info_hash, SHA_SIZE); 
-        //write(client_id, PEER_ID_SIZE);
+        write(peer->sock, tc.info_hash, SHA_SIZE); 
+        write(peer->sock, client_id, PEER_ID_SIZE);
 
         //receive handshake from peer
-        char reply_pstrlen[1];
-        char reply_pstr[strlen(pstr)];
+        uint8_t reply_pstrlen;
+        
         char reply_reserved[8];
         char reply_info_hash[SHA_SIZE];
-        char reply_peer_id[PEER_ID_SIZE];
-        read(peer->sock, reply_pstrlen, 1);
-        read(peer->sock, reply_pstr, strlen(pstr));
+        read(peer->sock, &reply_pstrlen, sizeof(uint8_t));
+        char reply_pstr[reply_pstrlen + 1];
+        read(peer->sock, reply_pstr, reply_pstrlen);
+        reply_pstr[reply_pstrlen] = '\0';
         read(peer->sock, reply_reserved, 8);
         read(peer->sock, reply_info_hash, SHA_SIZE);
-        if (!strcmp(reply_info_hash, tc.info_hash)) {
+        if (strncmp(reply_info_hash, tc.info_hash, SHA_SIZE)) {
         	printf("sha1 from responding handshake incorrect\n");
         	return -1;
         }
-        read(peer->sock, reply_peer_id, PEER_ID_SIZE);
-        //add peer id to peer
-
-        printf("handshake succeeded\n");
+        read(peer->sock, peer->id, PEER_ID_SIZE);
+        // printf("handshake succeeded with peer id %s\n", peer->id);
         return 0;
 }
 
+void request_block(peer_t *peer) {
+	int block;
+	int offset;
+	int length;
+	get_block(peer, &block, &offset, &length);
+	printf("requesting block %d of piece %d with offset %d and length %d\n", block, peer->cur_piece, offset, length);
+	char payload[REQUEST_LEN];
+	block = htonl(block);
+	offset = htonl(offset);
+	length = htonl(length);
+	memcpy(payload, &peer->cur_piece, sizeof(uint32_t));
+	memcpy(payload + 4, &offset, sizeof(uint32_t));
+	memcpy(payload+8, &length, sizeof(uint32_t));
+	send_message(peer->sock, REQUEST_LEN, REQUEST, payload);
+	//set that we have requested the block
+	set_bit(tc.pieces[peer->cur_piece].requested_blocks, block);
+	peer->num_requested++;
+}
+
 void handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
-	if (reply_id == BITFIELD) {
-		char bitfield[reply_len -1];
-		read(peer->sock, bitfield, reply_len -1);
-		peer->bitmap = bitfield;
-		peer->bitmap_len = reply_len -1; 
+	printf("handling reply %d with length %d\n", reply_id, reply_len);
+	if (reply_id == BITFIELD && peer->bitmap == NULL) {
+		peer->bitmap = (char *) malloc(reply_len -1);
+		read(peer->sock, peer->bitmap, reply_len -1);
+		printf("printing bitmap with len %d:", tc.num_pieces);
+		print_bitmap(peer->bitmap, (reply_len -1) * 8);
 		send_message(peer->sock, 1, INTERESTED, NULL);
+		request_block(peer);
 	} else if (reply_id == UNCHOKE) {
 		//send a bunch of requests
+		printf("received unchoke command\n");
 	} else if (reply_id == CHOKE) {
 
 	} else if (reply_id == PIECE) {
@@ -159,7 +181,8 @@ void handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		read(peer->sock, &index, sizeof(uint32_t));
 		read(peer->sock, &begin, sizeof(uint32_t));
 		read(peer->sock, block, reply_len - 9);
-		
+		index = ntohl(index);
+		begin = ntohl(begin);
 		//update block/piece map, check SHA-1
 		//send another request if needed
 	}
@@ -168,8 +191,8 @@ void handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 
 
 void send_message(int sock, uint32_t len, uint8_t id, char *payload) {
-	len = htonl(len);
-	write(sock, &len, sizeof(uint32_t));
+	uint32_t net_len = htonl(len);
+	write(sock, &net_len, sizeof(uint32_t));
 	write(sock, &id, sizeof(uint8_t));
 	if (payload != NULL) {
 		write(sock, payload, len-1);
@@ -177,24 +200,25 @@ void send_message(int sock, uint32_t len, uint8_t id, char *payload) {
 }
 
 void connect_to_peer(void *args) {
-	int peer_id = *(int*)args;
+	int peer_id = *((int *)args);
 	peer_t *peer = &tc.peers[peer_id];
-
 	//create TCP socket
 	char port_str[PORT_SIZE];
 	sprintf(port_str, "%u", peer->port);
 	if (create_tcp_socket(peer->ip, port_str, &peer->sock) < 0) {
-		printf("problem making tcp socket\n");
 		return;
 	}
 
-	//handshake
+	printf("successfully created tcp socket %d for ip %s and port %s\n", peer->sock, peer->ip, port_str);
+
+	// //handshake
 	if (do_handshake(peer) < 0) {
+		printf("error occured\n");
 		return;
 	}
 
-	//send bitfield
-	send_message(peer->sock, tc.num_pieces+1, BITFIELD, tc.piece_bitmap);
+	// //send bitfield
+	// send_message(peer->sock, tc.num_pieces+1, BITFIELD, tc.piece_bitmap);
 
 
 	//read for messages from peer
@@ -209,10 +233,12 @@ void connect_to_peer(void *args) {
 	*/
 	
 	while (1) {
+		printf("receiving reply\n");
 		uint32_t reply_len;
 		uint8_t reply_id;
 		read(peer->sock, &reply_len, sizeof(reply_len));
 		read(peer->sock, &reply_id, sizeof(reply_id));
+		printf("before reply len is %d\n", reply_len);
 		reply_len = ntohl(reply_len);
 		handle_reply(peer, reply_id, reply_len);
 	}
@@ -222,6 +248,7 @@ int setup_peers(char *peers_str, int peer_count) {
 	int i;
 	struct sockaddr_in sa;
 	tc.peers = (peer_t *)malloc(sizeof(peer_t)*peer_count);
+	tc.num_peers = peer_count;
 	for (i = 0; i < peer_count; i++) {
 		//parse ip address
 		uint32_t addr;
@@ -238,11 +265,14 @@ int setup_peers(char *peers_str, int peer_count) {
 		peers_str += 2;
 
 		//initalize connection states
-		tc.peers[i].am_chocking = 1;
+		tc.peers[i].am_choking = 1;
 		tc.peers[i].am_interested = 0;
 		tc.peers[i].peer_chocking = 1;
 		tc.peers[i].peer_interested = 0;
-
+		tc.peers[i].status = NO_CONNECTION;
+		tc.peers[i].cur_piece = UNSET;
+		tc.peers[i].num_requested = 0;
+		tc.peers[i].bitmap = NULL;
 
 		//start connecting with peer
 		int *peer_id = malloc(sizeof(int));
@@ -251,8 +281,8 @@ int setup_peers(char *peers_str, int peer_count) {
          	perror("problem creating peer thread");
          	return -1;       
         }
-        return 0;
 	}
+	return 0;
 	// TODO: thread for checking keep alive messages & sending keep alive messages
 }
 
@@ -422,7 +452,11 @@ void setup_pieces(char *pieces) {
 	int offset = 0;
 	int left = tc.torrent_len;
 	tc.num_pieces = (int)ceil((double)tc.torrent_len / (double)tc.piece_length);
+	printf("number of pieces is %d\n", tc.num_pieces);
 	tc.pieces = malloc(sizeof(piece_t) * tc.num_pieces);
+	tc.piece_bitmap = malloc(((int)(tc.num_pieces / 8)) + 1);
+	memset(tc.piece_bitmap, 0, ((int)(tc.num_pieces / 8)) + 1);
+	print_bitmap(tc.piece_bitmap, tc.num_pieces);
 	for (i = 0; i < tc.num_pieces; ++i) {
 		memcpy(tc.pieces[i].sha1, pieces, SHA_SIZE);
 		pieces += SHA_SIZE;
@@ -433,7 +467,12 @@ void setup_pieces(char *pieces) {
 		} else {
 			tc.pieces[i].len = tc.piece_length;
 		}
-		printf("piece %d length %d offset %d\n", i, tc.pieces[i].len, tc.pieces[i].offset);
+		tc.pieces[i].num_blocks = (int) tc.pieces[i].len / BLOCKSIZE;
+		tc.pieces[i].block_bitmap = malloc((int) (tc.pieces[i].num_blocks/8) + 1);
+		tc.pieces[i].requested_blocks = malloc((int) (tc.pieces[i].num_blocks/8) + 1);
+		memset(tc.pieces[i].block_bitmap, 0, (int) (tc.pieces[i].num_blocks/8) + 1);
+		memset(tc.pieces[i].requested_blocks, 0, (int) (tc.pieces[i].num_blocks/8) + 1);
+		// printf("piece %d length %d offset %d\n", i, tc.pieces[i].len, tc.pieces[i].offset);
 		left -= tc.piece_length;
 
 		//status
@@ -456,6 +495,7 @@ int main(int argc, char *argv[]) {
 	mkpath(tc.dest_dir, 0755);
 	tc.uploaded = 0;
 	tc.downloaded = 0;
+	pthread_mutex_init(&tc.mtx, NULL);
 	port = argv[3];
 
 	buf = read_file(argv[1], &len);
@@ -496,7 +536,7 @@ int main(int argc, char *argv[]) {
 		
 
 		SHA1(info_str, info_str_len, tc.info_hash);
-		sprintf(client_id, "emmanoah%d", getpid());
+		strcpy(client_id, "-EN0001-123456789012");
 		
 		//TODO - check if some of file has been downloaded - run function for "have" message once before requesting tracker info
 
@@ -510,9 +550,10 @@ int main(int argc, char *argv[]) {
 	if (buf != argv[1]) {
 		free(buf);
 	}
-	return 0;
+	pthread_exit(0);
 }
 
+//returns whether or not all of a piece's blocks have been requested
 int is_fully_requested(int pieceno) {
 	char *block_bitmap = tc.pieces[pieceno].requested_blocks;
 	int i;
@@ -524,19 +565,33 @@ int is_fully_requested(int pieceno) {
 	return 1;
 }
 
+//returns whether or not a piece is being requested currently by another peer (should request entire piece from one peer)
+int is_being_requested(int pieceno) {
+	int i;
+	for (i = 0; i < tc.num_peers; i++) {
+		if (tc.peers[i].cur_piece == pieceno ) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int get_next_piece() {
-	int i = UNSET;
+	int i;
 	for (i = 0; i < tc.num_pieces; i++) {
-		if (get_bit(tc.piece_bitmap, i) == 0 && !is_fully_requested(i)) {
+		// printf("piece %d has value %d and fully requested %d and is being requested %d\n", i, get_bit(tc.piece_bitmap, i), is_fully_requested(i), is_being_requested(i));
+		if (get_bit(tc.piece_bitmap, i) == 0 && !is_fully_requested(i) && !is_being_requested(i)) {
 			return i;
 		}
 	}
+	return UNSET;
 }
 
 int get_next_block(int pieceno) {
-	char *block_bitmap = tc.pieces[pieceno].tc.pieces[pieceno].requested_blocks;
-	int i = UNSET;
-	for (i = 0; i < ((int) tc.pieces[pieceno].len / BLOCKSIZE); i++) {
+	char *block_bitmap = tc.pieces[pieceno].requested_blocks;
+	int i;
+	for (i = 0; i < tc.pieces[pieceno].num_blocks; i++) {
+		printf("block value %d is %d\n", i, get_bit(block_bitmap, i));
 		if (get_bit(block_bitmap, i) == 0) {
 			return i;
 		}
@@ -546,10 +601,11 @@ int get_next_block(int pieceno) {
 //if all blocks have been requested, this puts UNSET in block
 void get_block(peer_t *peer, int *block, int *offset, int *length) {
 	pthread_mutex_lock(tc.mtx);
-	if (peer->cur_piece == UNSET || is_fully_requested(i) || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
+	if (peer->cur_piece == UNSET || is_fully_requested(peer->cur_piece) || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
+		peer->cur_piece = UNSET;
 		peer->cur_piece = get_next_piece();
 	}
-	if (peer->curpiece = UNSET) {
+	if (peer->cur_piece == UNSET) {
 		*block = UNSET;
 		return;
 	}

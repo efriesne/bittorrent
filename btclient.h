@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <arpa/inet.h>
-#include 
 
 
 #define set_bit(A,k)     ( A[(k/8)] |= (1 << (k%8)) )
@@ -24,6 +23,7 @@
 #define STRING_SIZE 128
 #define SHA_SIZE 20
 #define RESPONSE_FILENAME "tracker_response_file"
+#define REQUEST_LEN 13
 
 #define BLOCKSIZE 14000
 
@@ -38,6 +38,10 @@
 #define CANCEL 8
 #define PORT 9
 
+#define NO_CONNECTION 0
+#define HANDSHAKE_RECVD 1
+
+
 #define UNSET -1
 
 typedef struct piece {
@@ -46,6 +50,7 @@ typedef struct piece {
 	int offset;
 	int len;
 	int status;
+	int num_blocks;
 	char sha1[SHA_SIZE];
 } piece_t;
 
@@ -68,7 +73,6 @@ typedef struct peer {
 	int cur_piece; //the current piece we are downloading from this peer
 	uint16_t port;
 	int status;
-	int received_bitmap;
 	int am_choking;
 	int am_interested;
 	int peer_chocking;
@@ -78,7 +82,6 @@ typedef struct peer {
 	int num_requested; // the number of blocks we have requested from this peer (which havent been completed yet)
 	pthread_t thread;
 	char *bitmap;
-	char *bitmap_len;
 } peer_t;
 
 typedef struct torrent_ctrl {
@@ -93,6 +96,7 @@ typedef struct torrent_ctrl {
 	int torrent_len;
 	int num_pieces;
 	int num_files;
+	int num_peers;
 	int piece_length;
 	char info_hash[SHA_SIZE]; //maybe depending on number of times it is used
 	char tracker_url[1024];
@@ -105,3 +109,5 @@ torrent_ctrl_t tc;
 
 
 void print_bitmap(char *bitmap, int numbits);
+void send_message(int sock, uint32_t len, uint8_t id, char *payload);
+void get_block(peer_t *peer, int *block, int *offset, int *length);

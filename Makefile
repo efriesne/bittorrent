@@ -5,7 +5,7 @@ LDFLAGS = -lpthread
 
 all: btclient
 
-btclient: btclient.o bencode.o
+btclient: btclient.o bencode.o list.o
 	$(CC) $(CFLAGS) -o btclient btclient.o bencode.o list.o -lssl -lcrypto -lm -lcurl
 list.o: utils/list.c utils/list.h
 	$(CC) $(CFLAGS) utils/list.c -c
