@@ -144,12 +144,8 @@ int do_handshake(peer_t *peer) {
 }
 
 void send_bitmap(peer_t *peer) {
-	int len_bitfield;
-	if (tc.num_pieces % 8 == 0) {
-		len_bitfield = tc.num_pieces/8;
-	} else {
-		len_bitfield = (tc.num_pieces/8) + 1;
-	}
+	int len_bitfield = (int)ceil((double)tc.num_pieces / (double) 8);
+	printf("length of bitfield being send %d, number of pieces %d\n", len_bitfield, tc.num_pieces);
 	send_message(peer->sock, len_bitfield + 1, BITFIELD, tc.piece_bitmap);
 }
 
@@ -158,14 +154,16 @@ void request_block(peer_t *peer) {
 	int offset;
 	int length;
 	get_block(peer, &block, &offset, &length);
-	set_bit(tc.pieces[peer->cur_piece].requested_blocks, block);
-	get_block(peer, &block, &offset, &length);
-	printf("requesting block %d of piece %d with offset %d and length %d\n", block, peer->cur_piece, offset, length);
+	printf("requesting block %d of piece %d with offset %d and length %d (num_blocks in piece is %d size is %d)\n", block, peer->cur_piece, offset, length, tc.pieces[peer->cur_piece].num_blocks, tc.pieces[peer->cur_piece].len);
 	char payload[REQUEST_LEN];
+	if (peer->cur_piece == UNSET) {
+		return;
+	}
 	block = htonl(block);
 	offset = htonl(offset);
 	length = htonl(length);
-	memcpy(payload, &peer->cur_piece, sizeof(uint32_t));
+	int piece_num = htonl(peer->cur_piece);
+	memcpy(payload, &piece_num, sizeof(uint32_t));
 	memcpy(payload + 4, &offset, sizeof(uint32_t));
 	memcpy(payload+8, &length, sizeof(uint32_t));
 	send_message(peer->sock, REQUEST_LEN, REQUEST, payload);
@@ -180,8 +178,10 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		peer->bitmap = (char *) malloc(reply_len -1);
 		read(peer->sock, peer->bitmap, reply_len -1);
 		if (!is_full(peer->bitmap, tc.num_pieces)) {
+			printf("peer bitmap is not full disconnecting\n");
 			return -1;
 		}
+		peer->am_interested = 1;
 		printf("printing bitmap with len %d:", tc.num_pieces);
 		print_bitmap(peer->bitmap, (reply_len -1) * 8);
 		send_bitmap(peer);
@@ -190,21 +190,32 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		// request_block(peer);
 	} else if (reply_id == UNCHOKE) {
 		//send a bunch of requests
-		printf("received unchoke command\n");
-		request_block(peer);
+		printf("received unchoke\n");
+		if (peer->peer_choking == 1) {
+			while (peer->num_requested < 20) {
+				request_block(peer);
+			}
+			peer->peer_choking = 0;
+		}
+		
 	} else if (reply_id == CHOKE) {
 
 	} else if (reply_id == PIECE) {
 		uint32_t index;
 		uint32_t begin;
 		char block[reply_len - 9];
+		int bytes_read = 0;
 		read(peer->sock, &index, sizeof(uint32_t));
 		read(peer->sock, &begin, sizeof(uint32_t));
-		read(peer->sock, block, reply_len - 9);
+		while (bytes_read < reply_len - 9) {
+			bytes_read += read(peer->sock, block, reply_len - 9 - bytes_read);
+		}
+		printf("read %d bytes from the socket\n", bytes_read);
 		index = ntohl(index);
 		begin = ntohl(begin);
 		printf("recieved piece reply with index %d and begin %d\n", index, begin);
 		write_block(block, index, begin, reply_len - 9);
+		peer->num_requested-= 1;
 		request_block(peer);
 		//update block/piece map, check SHA-1
 		//send another request if needed
@@ -219,12 +230,14 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 
 void send_message(int sock, uint32_t len, uint8_t id, char *payload) {
 	uint32_t net_len = htonl(len);
-	write(sock, &net_len, sizeof(uint32_t));
-	write(sock, &id, sizeof(uint8_t));
+	int written = write(sock, &net_len, sizeof(uint32_t));
+	written += write(sock, &id, sizeof(uint8_t));
 	if (payload != NULL) {
-		write(sock, payload, len-1);
+		written += write(sock, payload, len-1);
 	}
+	printf("%d bytes written to socket\n", written);
 }
+
 
 void connect_to_peer(void *args) {
 	int peer_id = *((int *)args);
@@ -278,6 +291,7 @@ int setup_peers(char *peers_str, int peer_count) {
 	struct sockaddr_in sa;
 	tc.peers = (peer_t *)malloc(sizeof(peer_t)*peer_count);
 	tc.num_peers = peer_count;
+
 	for (i = 0; i < peer_count; i++) {
 		//parse ip address
 		uint32_t addr;
@@ -296,7 +310,7 @@ int setup_peers(char *peers_str, int peer_count) {
 		//initalize connection states
 		tc.peers[i].am_choking = 1;
 		tc.peers[i].am_interested = 0;
-		tc.peers[i].peer_chocking = 1;
+		tc.peers[i].peer_choking = 1;
 		tc.peers[i].peer_interested = 0;
 		tc.peers[i].status = NO_CONNECTION;
 		tc.peers[i].cur_piece = UNSET;
@@ -498,7 +512,7 @@ void setup_pieces(char *pieces) {
 		} else {
 			tc.pieces[i].len = tc.piece_length;
 		}
-		tc.pieces[i].num_blocks = (int) tc.pieces[i].len / BLOCKSIZE;
+		tc.pieces[i].num_blocks = (int) ceil((double)tc.pieces[i].len / (double) BLOCKSIZE);
 		tc.pieces[i].block_bitmap = malloc((int) (tc.pieces[i].num_blocks/8) + 1);
 		tc.pieces[i].requested_blocks = malloc((int) (tc.pieces[i].num_blocks/8) + 1);
 		memset(tc.pieces[i].block_bitmap, 0, (int) (tc.pieces[i].num_blocks/8) + 1);
@@ -511,6 +525,43 @@ void setup_pieces(char *pieces) {
 	} 
 }
 
+void read_files(int start_byte, int length, char *buffer) {
+	int i;
+	for (i=0; i < tc.num_files; i++) {
+		btfile_t file = tc.files[i];
+		if (start_byte >= file.offset && start_byte < file.offset + file.len) {
+			int to_read = MIN(file.len - (start_byte - file.offset), length);
+			struct stat buf;
+			fstat(file.fd, &buf);
+			int size = buf.st_size;
+			lseek(file.fd, start_byte - file.offset, SEEK_SET);
+			int bytes_read = read(file.fd, buffer, to_read);
+			printf("read %d bytes from file %s (to read is %d file size is %d) \n", bytes_read, file.filename, to_read, size);
+			if (bytes_read != to_read) {
+				printf("read failed\n");
+				return;
+			}
+			if (bytes_read < length) {
+				read_files(start_byte + bytes_read, length - bytes_read, buffer + bytes_read);
+			}
+		}
+	}
+}
+
+void bitmap_initialize() {
+	int i;
+	for (i = 0; i < tc.num_pieces; i++) {
+		printf("checking piece %d\n", i);
+		piece_t piece = tc.pieces[i];
+		char data[piece.len];
+		char hash[SHA_SIZE];
+		read_files(piece.offset, piece.len, data);
+		SHA1(data, piece.len, hash);
+		if (!strncmp(piece.sha1, hash, SHA_SIZE)) {
+			printf("we have piece %d\n", i);
+		}
+	}
+}
 
 int main(int argc, char *argv[]) {
 	int i, j;
@@ -523,6 +574,7 @@ int main(int argc, char *argv[]) {
 		return -1;
 	}
 	tc.dest_dir = argv[2];
+	pthread_mutex_init(&tc.mtx);
 	mkpath(tc.dest_dir, 0755);
 	tc.uploaded = 0;
 	tc.downloaded = 0;
@@ -564,7 +616,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		
-
+		// bitmap_initialize();
 		SHA1(info_str, info_str_len, tc.info_hash);
 		strcpy(client_id, "-EN0001-123456789012");
 		
@@ -620,7 +672,7 @@ int get_next_block(int pieceno) {
 	char *block_bitmap = tc.pieces[pieceno].requested_blocks;
 	int i;
 	for (i = 0; i < tc.pieces[pieceno].num_blocks; i++) {
-		printf("value of block %d is %d\n", i, get_bit(block_bitmap, i));
+		// printf("value of block %d is %d\n", i, get_bit(block_bitmap, i));
 		if (get_bit(block_bitmap, i) == 0) {
 			return i;
 		}
@@ -629,18 +681,18 @@ int get_next_block(int pieceno) {
 
 //if all blocks have been requested, this puts UNSET in block
 void get_block(peer_t *peer, int *block, int *offset, int *length) {
-	// pthread_mutex_lock(tc.mtx);
+	pthread_mutex_lock(&tc.mtx);
 	if (peer->cur_piece == UNSET || is_full(tc.pieces[peer->cur_piece].requested_blocks, tc.pieces[peer->cur_piece].num_blocks) || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
 		peer->cur_piece = UNSET;
 		peer->cur_piece = get_next_piece();
 	}
 	if (peer->cur_piece == UNSET) {
 		*block = UNSET;
-		// pthread_mutex_unlock(tc.mtx);
+		pthread_mutex_unlock(&tc.mtx);
 		return;
 	}
 	int blockno = get_next_block(peer->cur_piece);
-	// pthread_mutex_unlock(tc.mtx);
+	pthread_mutex_unlock(&tc.mtx);
 	*block = blockno;
 	*offset = blockno*BLOCKSIZE;
 	*length = MIN(BLOCKSIZE, tc.pieces[peer->cur_piece].len - *offset);
@@ -653,6 +705,7 @@ int write_block(char *block_ptr, int pieceno, int offset, int len) {
 		btfile_t file = tc.files[i];
 		if (byte_num >= file.offset && byte_num < file.offset + file.len) {
 			int to_write = MIN(len, file.len);
+			lseek(file.fd, byte_num - file.offset, SEEK_SET);
 			int written = write(file.fd, block_ptr, to_write);
 			printf("wrote %d bytes to file %s\n", written, file.filename);
 			if (written < 0) {

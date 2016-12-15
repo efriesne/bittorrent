@@ -25,7 +25,7 @@
 #define RESPONSE_FILENAME "tracker_response_file"
 #define REQUEST_LEN 13
 
-#define BLOCKSIZE 14000
+#define BLOCKSIZE 16000
 
 #define CHOKE 0
 #define UNCHOKE 1
@@ -75,7 +75,7 @@ typedef struct peer {
 	int status;
 	int am_choking;
 	int am_interested;
-	int peer_chocking;
+	int peer_choking;
 	int peer_interested;
 	int sock;
 	// list_t requested; should we keep a list of what blocks have been requested from this peer in case they choke or cancel?
