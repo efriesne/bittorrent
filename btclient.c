@@ -153,6 +153,10 @@ void request_block(peer_t *peer) {
 	int block;
 	int offset;
 	int length;
+	if (peer->cur_piece != 0 && is_being_requested(0)) {
+		return;
+	}
+	peer->cur_piece = 0;
 	get_block(peer, &block, &offset, &length);
 	printf("requesting block %d of piece %d with offset %d and length %d (num_blocks in piece is %d size is %d)\n", block, peer->cur_piece, offset, length, tc.pieces[peer->cur_piece].num_blocks, tc.pieces[peer->cur_piece].len);
 	char payload[REQUEST_LEN];
@@ -208,7 +212,7 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		read(peer->sock, &index, sizeof(uint32_t));
 		read(peer->sock, &begin, sizeof(uint32_t));
 		while (bytes_read < reply_len - 9) {
-			bytes_read += read(peer->sock, block, reply_len - 9 - bytes_read);
+			bytes_read += read(peer->sock, block+ bytes_read, reply_len - 9 - bytes_read);
 		}
 		printf("read %d bytes from the socket\n", bytes_read);
 		index = ntohl(index);
@@ -452,12 +456,13 @@ void setup_files(be_node *files) {
 			}
 			if (!strcmp(file_item.key, "path")) {
 				be_node *node = file_item.val->val.l[0];
-				memcpy(tc.files[i].filename, node->val.s, strlen(node->val.s));
+				memcpy(tc.files[i].filename, node->val.s, strlen(node->val.s) );
+				printf("creating file with name %s\n", tc.files[i].filename);
 				char full_path[MAX_FILENAME];
 				memcpy(full_path, tc.dest_dir, strlen(tc.dest_dir));
-				memcpy(full_path + strlen(tc.dest_dir), tc.files[i].filename, strlen(tc.files[i].filename));
+				memcpy(full_path + strlen(tc.dest_dir), tc.files[i].filename, strlen(tc.files[i].filename) + 1);
+				printf("full path for file is %s\n");
 				tc.files[i].fd = open(full_path, O_CREAT | O_RDWR, S_IRWXU);
-				printf("filename %s\n", tc.files[i].filename);
 			}
 		}
 	}
@@ -793,10 +798,12 @@ int write_block(char *block_ptr, int pieceno, int offset, int len) {
 	for (i = 0; i < tc.num_files; i++) {
 		btfile_t file = tc.files[i];
 		if (byte_num >= file.offset && byte_num < file.offset + file.len) {
-			int to_write = MIN(len, file.len);
+			int to_write = MIN(len, file.len - (byte_num - file.offset));
+			pthread_mutex_lock(&tc.mtx);
 			lseek(file.fd, byte_num - file.offset, SEEK_SET);
 			int written = write(file.fd, block_ptr, to_write);
-			printf("wrote %d bytes to file %s\n", written, file.filename);
+			pthread_mutex_unlock(&tc.mtx);
+			printf("wrote %d bytes to file %s at location %d of file starting at offset %d\n", written, file.filename, byte_num - file.offset, file.offset);
 			if (written < 0) {
 				//error occurred
 				perror("error writing to one of the files");
