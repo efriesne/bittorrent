@@ -199,7 +199,7 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		}
 		
 	} else if (reply_id == CHOKE) {
-
+		peer->peer_choking = 1;
 	} else if (reply_id == PIECE) {
 		uint32_t index;
 		uint32_t begin;
@@ -563,6 +563,79 @@ void bitmap_initialize() {
 	}
 }
 
+void help_cmd(const char *line){
+  (void)line;
+
+  printf("- help: Print this list of commands.\n"
+  		 "- list: Print information the torrent.\n"
+         "- detail: Print information the torrent.\n");
+
+  return;
+}
+
+void cleanup_and_exit() {
+  exit(0);
+}
+
+void list_cmd(const char *line){
+  
+}
+
+void detail_cmd(const char *line){
+}
+
+void quit_cmd(const char *line){
+  cleanup_and_exit();
+}
+
+struct {
+  const char *command;
+  void (*handler)(const char *);
+} cmd_table[] = {
+  {"help", help_cmd},
+  {"detail", detail_cmd},
+  {"list", list_cmd},
+  {"q", quit_cmd}
+};
+
+void driver(){
+  char line[LINE_MAX];
+  char cmd[LINE_MAX];
+  char *fgets_ret;
+  int ret;
+  unsigned i; 
+
+  while (1){
+    printf("> ");
+    (void)fflush(stdout);
+
+    fgets_ret = fgets(line, sizeof(line), stdin);
+    if (fgets_ret == NULL){
+      break;
+    }
+
+    ret = sscanf(line, "%s", cmd);
+    if (ret != 1){
+      fprintf(stderr, "syntax error (first argument must be a command)\n");
+      continue;
+    }
+
+    for (i=0; i < sizeof(cmd_table) / sizeof(cmd_table[0]); i++){
+      if (!strcmp(cmd, cmd_table[i].command)){
+        cmd_table[i].handler(line);
+        break;
+      }
+    }
+
+    if (i == sizeof(cmd_table) / sizeof(cmd_table[0])){
+      fprintf(stderr, "error: no valid command specified\n");
+      continue;
+    }
+
+  }
+  return;
+}
+
 int main(int argc, char *argv[]) {
 	int i, j;
 	char *buf;
@@ -573,6 +646,7 @@ int main(int argc, char *argv[]) {
 		printf("error: usage is <torrentfile> <dest directory> <port number>\n");
 		return -1;
 	}
+
 	tc.dest_dir = argv[2];
 	pthread_mutex_init(&tc.mtx);
 	mkpath(tc.dest_dir, 0755);
@@ -580,6 +654,7 @@ int main(int argc, char *argv[]) {
 	tc.downloaded = 0;
 	port = argv[3];
 
+	//parse metainfo
 	buf = read_file(argv[1], &len);
 	if (!buf) {
 		buf = argv[1];
@@ -588,6 +663,8 @@ int main(int argc, char *argv[]) {
 	char info_str[len];
 	int info_str_len;
 	printf("DECODING: %s\n", argv[1]);
+	char name[MAX_FILENAME];
+	memset(name, 0, MAX_FILENAME);
 	n = be_decoden(buf, len, info_str, &info_str_len);
 	if (n) {
 		be_dump(n);
@@ -602,10 +679,19 @@ int main(int argc, char *argv[]) {
 				for (j = 0; info_n->val.d[j].val; ++j) {
 					if (!strcmp(info_n->val.d[j].key, "files")) { //multi file mode
 						setup_files(info_n->val.d[j].val);
+					} else if (!strcmp(info_n->val.d[j].key, "name")) {
+						memcpy(name, info_n->val.d[j].val->val.s, strlen(info_n->val.d[j].val->val.s));
 					} else if (!strcmp(info_n->val.d[j].key, "length")) { //single file mode
-						
-						//TO DO
-
+						tc.files = malloc(sizeof(btfile_t));
+						tc.num_files = 1;
+						tc.files[0].offset = 0;
+						tc.files[0].len = info_n->val.d[j].val->val.i;
+						tc.torrent_len = info_n->val.d[j].val->val.i;
+						memcpy(tc.files[0].filename, name, strlen(name));
+						char full_path[MAX_FILENAME];
+						memcpy(full_path, tc.dest_dir, strlen(tc.dest_dir));
+						memcpy(full_path + strlen(tc.dest_dir), name, strlen(name));
+						tc.files[i].fd = open(full_path, O_CREAT | O_RDWR, S_IRWXU);
 					} else if (!strcmp(info_n->val.d[j].key, "piece length")) {
 						tc.piece_length = info_n->val.d[j].val->val.i;
 					} else if (!strcmp(info_n->val.d[j].key, "pieces")) {
@@ -622,8 +708,11 @@ int main(int argc, char *argv[]) {
 		
 		//TODO - check if some of file has been downloaded - run function for "have" message once before requesting tracker info
 
-		tracker_request_func("started");
+		//tracker_request_func("started");
 		be_free(n);
+
+
+		driver();
 		
 
 	} else {
