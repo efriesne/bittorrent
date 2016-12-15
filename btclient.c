@@ -132,19 +132,33 @@ int do_handshake(peer_t *peer) {
         reply_pstr[reply_pstrlen] = '\0';
         read(peer->sock, reply_reserved, 8);
         read(peer->sock, reply_info_hash, SHA_SIZE);
+        read(peer->sock, peer->id, PEER_ID_SIZE);
+        printf("received pstr: %s with tc hash %s and id %s\n", reply_pstr, reply_info_hash, peer->id);
         if (strncmp(reply_info_hash, tc.info_hash, SHA_SIZE)) {
         	printf("sha1 from responding handshake incorrect\n");
         	return -1;
         }
-        read(peer->sock, peer->id, PEER_ID_SIZE);
+
         // printf("handshake succeeded with peer id %s\n", peer->id);
         return 0;
+}
+
+void send_bitmap(peer_t *peer) {
+	int len_bitfield;
+	if (tc.num_pieces % 8 == 0) {
+		len_bitfield = tc.num_pieces/8;
+	} else {
+		len_bitfield = (tc.num_pieces/8) + 1;
+	}
+	send_message(peer->sock, len_bitfield + 1, BITFIELD, tc.piece_bitmap);
 }
 
 void request_block(peer_t *peer) {
 	int block;
 	int offset;
 	int length;
+	get_block(peer, &block, &offset, &length);
+	set_bit(tc.pieces[peer->cur_piece].requested_blocks, block);
 	get_block(peer, &block, &offset, &length);
 	printf("requesting block %d of piece %d with offset %d and length %d\n", block, peer->cur_piece, offset, length);
 	char payload[REQUEST_LEN];
@@ -156,22 +170,28 @@ void request_block(peer_t *peer) {
 	memcpy(payload+8, &length, sizeof(uint32_t));
 	send_message(peer->sock, REQUEST_LEN, REQUEST, payload);
 	//set that we have requested the block
-	set_bit(tc.pieces[peer->cur_piece].requested_blocks, block);
+	set_bit(tc.pieces[peer->cur_piece].requested_blocks, ntohl(block));
 	peer->num_requested++;
 }
 
-void handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
+int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 	printf("handling reply %d with length %d\n", reply_id, reply_len);
 	if (reply_id == BITFIELD && peer->bitmap == NULL) {
 		peer->bitmap = (char *) malloc(reply_len -1);
 		read(peer->sock, peer->bitmap, reply_len -1);
+		if (!is_full(peer->bitmap, tc.num_pieces)) {
+			return -1;
+		}
 		printf("printing bitmap with len %d:", tc.num_pieces);
 		print_bitmap(peer->bitmap, (reply_len -1) * 8);
+		send_bitmap(peer);
 		send_message(peer->sock, 1, INTERESTED, NULL);
-		request_block(peer);
+		printf("done sending bitmap and interested message\n");
+		// request_block(peer);
 	} else if (reply_id == UNCHOKE) {
 		//send a bunch of requests
 		printf("received unchoke command\n");
+		request_block(peer);
 	} else if (reply_id == CHOKE) {
 
 	} else if (reply_id == PIECE) {
@@ -183,9 +203,16 @@ void handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		read(peer->sock, block, reply_len - 9);
 		index = ntohl(index);
 		begin = ntohl(begin);
+		printf("recieved piece reply with index %d and begin %d\n", index, begin);
+		write_block(block, index, begin, reply_len - 9);
+		request_block(peer);
 		//update block/piece map, check SHA-1
 		//send another request if needed
+	} else {
+		printf("received improper reply id number exiting\n");
+		return -1;
 	}
+	return 0;
 }
 
 
@@ -231,16 +258,18 @@ void connect_to_peer(void *args) {
 	* 5. After receiving a block, check the SHA-1 to see if the piece has been fully downloaded 
 	** always check for receival of a choke
 	*/
-	
+	//212 with length 1699497422
+	//handling reply 165 with length -1306272106
 	while (1) {
 		printf("receiving reply\n");
 		uint32_t reply_len;
 		uint8_t reply_id;
 		read(peer->sock, &reply_len, sizeof(reply_len));
 		read(peer->sock, &reply_id, sizeof(reply_id));
-		printf("before reply len is %d\n", reply_len);
 		reply_len = ntohl(reply_len);
-		handle_reply(peer, reply_id, reply_len);
+		if (handle_reply(peer, reply_id, reply_len) < 0) {
+			return;
+		}
 	}
 }
 
@@ -397,12 +426,14 @@ void setup_files(be_node *files) {
 		num_files++;
 	}
 	tc.files = malloc(sizeof(btfile_t)*num_files);
+	tc.num_files = num_files;
 	for (i = 0; files->val.l[i]; ++i) {
 		be_node *file = files->val.l[i];
 		for (j = 0; file->val.d[j].val; ++j) {
 			be_dict file_item = file->val.d[j];
 			if (!strcmp(file_item.key, "length")) {
 				tc.files[i].offset = tc.torrent_len;
+				tc.files[i].len = file_item.val->val.i;
 				tc.torrent_len += file_item.val->val.i;
 			}
 			if (!strcmp(file_item.key, "path")) {
@@ -495,7 +526,6 @@ int main(int argc, char *argv[]) {
 	mkpath(tc.dest_dir, 0755);
 	tc.uploaded = 0;
 	tc.downloaded = 0;
-	pthread_mutex_init(&tc.mtx, NULL);
 	port = argv[3];
 
 	buf = read_file(argv[1], &len);
@@ -554,11 +584,10 @@ int main(int argc, char *argv[]) {
 }
 
 //returns whether or not all of a piece's blocks have been requested
-int is_fully_requested(int pieceno) {
-	char *block_bitmap = tc.pieces[pieceno].requested_blocks;
+int is_full(char *bitmap, int len) {
 	int i;
-	for (i = 0; i < ((int) tc.pieces[pieceno].len / BLOCKSIZE); i++) {
-		if (get_bit(block_bitmap, i) == 0) {
+	for (i = 0; i < len; i++) {
+		if (get_bit(bitmap, i) == 0) {
 			return 0;
 		}
 	}
@@ -580,7 +609,7 @@ int get_next_piece() {
 	int i;
 	for (i = 0; i < tc.num_pieces; i++) {
 		// printf("piece %d has value %d and fully requested %d and is being requested %d\n", i, get_bit(tc.piece_bitmap, i), is_fully_requested(i), is_being_requested(i));
-		if (get_bit(tc.piece_bitmap, i) == 0 && !is_fully_requested(i) && !is_being_requested(i)) {
+		if (get_bit(tc.piece_bitmap, i) == 0 && !is_full(tc.pieces[i].requested_blocks, tc.pieces[i].num_blocks) && !is_being_requested(i)) {
 			return i;
 		}
 	}
@@ -591,7 +620,7 @@ int get_next_block(int pieceno) {
 	char *block_bitmap = tc.pieces[pieceno].requested_blocks;
 	int i;
 	for (i = 0; i < tc.pieces[pieceno].num_blocks; i++) {
-		printf("block value %d is %d\n", i, get_bit(block_bitmap, i));
+		printf("value of block %d is %d\n", i, get_bit(block_bitmap, i));
 		if (get_bit(block_bitmap, i) == 0) {
 			return i;
 		}
@@ -600,17 +629,18 @@ int get_next_block(int pieceno) {
 
 //if all blocks have been requested, this puts UNSET in block
 void get_block(peer_t *peer, int *block, int *offset, int *length) {
-	pthread_mutex_lock(tc.mtx);
-	if (peer->cur_piece == UNSET || is_fully_requested(peer->cur_piece) || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
+	// pthread_mutex_lock(tc.mtx);
+	if (peer->cur_piece == UNSET || is_full(tc.pieces[peer->cur_piece].requested_blocks, tc.pieces[peer->cur_piece].num_blocks) || get_bit(tc.piece_bitmap, peer->cur_piece) == 1) {
 		peer->cur_piece = UNSET;
 		peer->cur_piece = get_next_piece();
 	}
 	if (peer->cur_piece == UNSET) {
 		*block = UNSET;
+		// pthread_mutex_unlock(tc.mtx);
 		return;
 	}
 	int blockno = get_next_block(peer->cur_piece);
-	pthread_mutex_unlock(tc.mtx);
+	// pthread_mutex_unlock(tc.mtx);
 	*block = blockno;
 	*offset = blockno*BLOCKSIZE;
 	*length = MIN(BLOCKSIZE, tc.pieces[peer->cur_piece].len - *offset);
@@ -624,6 +654,7 @@ int write_block(char *block_ptr, int pieceno, int offset, int len) {
 		if (byte_num >= file.offset && byte_num < file.offset + file.len) {
 			int to_write = MIN(len, file.len);
 			int written = write(file.fd, block_ptr, to_write);
+			printf("wrote %d bytes to file %s\n", written, file.filename);
 			if (written < 0) {
 				//error occurred
 				perror("error writing to one of the files");

@@ -6,9 +6,9 @@
 #include <arpa/inet.h>
 
 
-#define set_bit(A,k)     ( A[(k/8)] |= (1 << (k%8)) )
-#define clear_bit(A,k)   ( A[(k/8)] &= ~(1 << (k%8)) )
-#define get_bit(A,k)    ( (A[(k/8)] & (1 << (k%8))) >> (k%8))
+#define set_bit(A,k)     ( A[(k/8)] |= (1 << (7 - k%8)) )
+#define clear_bit(A,k)   ( A[(k/8)] &= ~(1 << (7 - k%8)) )
+#define get_bit(A,k)    ( (A[(k/8)] & (1 << (7 - k%8))) >> (7 -k%8))
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
