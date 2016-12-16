@@ -111,3 +111,7 @@ torrent_ctrl_t tc;
 void print_bitmap(char *bitmap, int numbits);
 void send_message(int sock, uint32_t len, uint8_t id, char *payload);
 void get_block(peer_t *peer, int *block, int *offset, int *length);
+
+
+// check piece
+// readme

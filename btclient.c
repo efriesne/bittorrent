@@ -217,8 +217,13 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		printf("read %d bytes from the socket\n", bytes_read);
 		index = ntohl(index);
 		begin = ntohl(begin);
+		int blocknum = begin / BLOCKSIZE;
 		printf("recieved piece reply with index %d and begin %d\n", index, begin);
 		write_block(block, index, begin, reply_len - 9);
+		set_bit(tc.pieces[index].block_bitmap, blocknum);
+		if (is_full(tc.pieces[index].block_bitmap, tc.pieces[index].num_blocks)) {
+			set_bit(tc.piece_bitmap, index);
+		}
 		peer->num_requested-= 1;
 		request_block(peer);
 		//update block/piece map, check SHA-1
@@ -275,8 +280,6 @@ void connect_to_peer(void *args) {
 	* 5. After receiving a block, check the SHA-1 to see if the piece has been fully downloaded 
 	** always check for receival of a choke
 	*/
-	//212 with length 1699497422
-	//handling reply 165 with length -1306272106
 	while (1) {
 		printf("receiving reply\n");
 		uint32_t reply_len;
@@ -286,6 +289,9 @@ void connect_to_peer(void *args) {
 		reply_len = ntohl(reply_len);
 		if (handle_reply(peer, reply_id, reply_len) < 0) {
 			return;
+		}
+		if (is_full(tc.piece_bitmap, tc.num_pieces)) {
+			printf("done torrenting file\n");
 		}
 	}
 }
@@ -541,9 +547,7 @@ void read_files(int start_byte, int length, char *buffer) {
 			int size = buf.st_size;
 			lseek(file.fd, start_byte - file.offset, SEEK_SET);
 			int bytes_read = read(file.fd, buffer, to_read);
-			printf("read %d bytes from file %s (to read is %d file size is %d) \n", bytes_read, file.filename, to_read, size);
 			if (bytes_read != to_read) {
-				printf("read failed\n");
 				return;
 			}
 			if (bytes_read < length) {
@@ -556,14 +560,17 @@ void read_files(int start_byte, int length, char *buffer) {
 void bitmap_initialize() {
 	int i;
 	for (i = 0; i < tc.num_pieces; i++) {
-		printf("checking piece %d\n", i);
 		piece_t piece = tc.pieces[i];
 		char data[piece.len];
 		char hash[SHA_SIZE];
 		read_files(piece.offset, piece.len, data);
 		SHA1(data, piece.len, hash);
 		if (!strncmp(piece.sha1, hash, SHA_SIZE)) {
-			printf("we have piece %d\n", i);
+			set_bit(tc.piece_bitmap, i);
+			int j;
+			for (j = 0; j < tc.pieces[i].num_blocks; j++) {
+				set_bit(tc.pieces[i].block_bitmap, j);
+			}
 		}
 	}
 }
@@ -621,13 +628,15 @@ int main(int argc, char *argv[]) {
 		}
 
 		
-		// bitmap_initialize();
+		bitmap_initialize();
+		printf("current bitmap is: ");
+		print_bitmap(tc.piece_bitmap, tc.num_pieces);
 		SHA1(info_str, info_str_len, tc.info_hash);
 		strcpy(client_id, "-EN0001-123456789012");
 		
 		//TODO - check if some of file has been downloaded - run function for "have" message once before requesting tracker info
 
-		tracker_request_func("started");
+		// tracker_request_func("started");
 		be_free(n);
 		
 
