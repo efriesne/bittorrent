@@ -73,7 +73,7 @@ int create_tcp_socket(char *host, char *port, int *sock){
         }
 
         if (rp == NULL){
-                fprintf(stderr, "error: could not connect to host %s at port number %s\n", host, port);
+                //fprintf(stderr, "error: could not connect to host %s at port number %s\n", host, port);
                 freeaddrinfo(results);
                 return -CONN_ERR;
         }
@@ -181,7 +181,9 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		peer->bitmap = (char *) malloc(reply_len -1);
 		read(peer->sock, peer->bitmap, reply_len -1);
 		if (!is_full(peer->bitmap, tc.num_pieces)) {
-			printf("peer bitmap is not full disconnecting\n");
+			peer->status = DISCONNECTED;
+			tc.num_estab_peers -= 1;
+			//printf("peer bitmap is not full disconnecting\n");
 			return -1;
 		}
 		peer->am_interested = 1;
@@ -193,7 +195,7 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		// request_block(peer);
 	} else if (reply_id == UNCHOKE) {
 		//send a bunch of requests
-		printf("received unchoke\n");
+		//printf("received unchoke\n");
 		if (peer->peer_choking == 1) {
 			while (peer->num_requested < 20) {
 				request_block(peer);
@@ -217,14 +219,21 @@ int handle_reply(peer_t *peer, uint8_t reply_id, int reply_len) {
 		index = ntohl(index);
 		begin = ntohl(begin);
 		//printf("recieved piece reply with index %d and begin %d\n", index, begin);
+		int blocknum = begin / BLOCKSIZE;
 		write_block(block, index, begin, reply_len - 9);
+		set_bit(tc.pieces[index].block_bitmap, blocknum);
+		if (is_full(tc.pieces[index].block_bitmap, tc.pieces[index].num_blocks)) {
+			set_bit(tc.piece_bitmap, index);
+		}
 		peer->num_requested-= 1;
 		tc.downloaded += reply_len -9;
 		request_block(peer);
 		//update block/piece map, check SHA-1
 		//send another request if needed
 	} else {
-		printf("received improper reply id number exiting\n");
+		//printf("received improper reply id number exiting\n");
+		peer->status = DISCONNECTED;
+		tc.num_estab_peers -= 1;
 		return -1;
 	}
 	return 0;
@@ -267,8 +276,6 @@ void connect_to_peer(void *args) {
 	// send_message(peer->sock, tc.num_pieces+1, BITFIELD, tc.piece_bitmap);
 
 
-	//212 with length 1699497422
-	//handling reply 165 with length -1306272106
 	while (1) {
 		//printf("receiving reply\n");
 		uint32_t reply_len;
@@ -509,7 +516,6 @@ void read_files(int start_byte, int length, char *buffer) {
 			int bytes_read = read(file.fd, buffer, to_read);
 			//printf("read %d bytes from file %s (to read is %d file size is %d) \n", bytes_read, file.filename, to_read, size);
 			if (bytes_read != to_read) {
-				printf("read failed\n");
 				return;
 			}
 			if (bytes_read < length) {
@@ -522,14 +528,17 @@ void read_files(int start_byte, int length, char *buffer) {
 void bitmap_initialize() {
 	int i;
 	for (i = 0; i < tc.num_pieces; i++) {
-		//printf("checking piece %d\n", i);
 		piece_t piece = tc.pieces[i];
 		char data[piece.len];
 		char hash[SHA_SIZE];
 		read_files(piece.offset, piece.len, data);
 		SHA1(data, piece.len, hash);
 		if (!strncmp(piece.sha1, hash, SHA_SIZE)) {
-			printf("we have piece %d\n", i);
+			set_bit(tc.piece_bitmap, i);
+			int j;
+			for (j = 0; j < tc.pieces[i].num_blocks; j++) {
+				set_bit(tc.pieces[i].block_bitmap, j);
+			}
 		}
 	}
 }
@@ -776,7 +785,9 @@ int main(int argc, char *argv[]) {
 		}
 
 		
-		// bitmap_initialize();
+		bitmap_initialize();
+		//printf("current bitmap is: ");
+		//print_bitmap(tc.piece_bitmap, tc.num_pieces);
 		SHA1(info_str, info_str_len, tc.info_hash);
 		strcpy(client_id, "-EN0001-123456789012");
 		

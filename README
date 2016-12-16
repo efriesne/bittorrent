@@ -1,0 +1,12 @@
+
+
+Tracker Protocol:
+
+We used libcurl c package to communicate with the tracker. After parsing the metainfo file we maintain separate lists for files, pieces and peers.
+
+Torrent Download:
+We implemented downloading using one torrent at a time. We create a  new thread for each connecting to each peer in the torrent file. After receiving an unchoke we send 20 requests for blocks to the peer. The algorithm is as follows: if the piece we are requesting from a peer is full then choose the next piece that isn't downloaded and which isnt being requested by any other peer, choose the first block within this piece that hasn't been downloaded and request from the peer until all pieces have been downloaded.   
+
+Torrent Upload:
+not implemented
+
