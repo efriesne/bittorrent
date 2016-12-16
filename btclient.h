@@ -60,6 +60,7 @@ typedef struct btfile {
 	int fd;
 	int len;
 	char sha1[SHA_SIZE];
+	char filepath[MAX_FILENAME];
 } btfile_t;
 
 typedef struct block {
@@ -101,6 +102,8 @@ typedef struct torrent_ctrl {
 	char info_hash[SHA_SIZE]; //maybe depending on number of times it is used
 	char tracker_url[1024];
 	char *tracker_id;
+	int num_estab_peers;
+	int seeding;
 } torrent_ctrl_t;
 
 char *port;

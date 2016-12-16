@@ -110,7 +110,7 @@ static char *_be_decode_str(const char **data, long long *data_len)
 		*data += len + 1;
 		*data_len -= len + 1;
 
-		DUMP_STRING(ret, sllen);
+		//DUMP_STRING(ret, sllen);
 	}
 	return ret;
 }
@@ -167,7 +167,7 @@ static be_node *_be_decode(const char **data, long long *data_len, char *info_st
 				DBG("  [%i] key: ", i);
 				ret->val.d[i].key = _be_decode_str(data, data_len);
 				if (!strcmp(ret->val.d[i].key,"locale")) {
-					printf("locale len %d\n", *data_len);
+					//printf("locale len %d\n", *data_len);
 				}
 				DBG("\n");
 				char *tmp = *data;
